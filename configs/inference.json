@@ -1,0 +1,4 @@
+{
+  "_note": "Live inference parameters. sharpen_T multiplies prediction logits before Kelly sizing (p' = sigmoid(T * logit(p))). T=1.25 validated cross-window for both ensembles on 2026-06-11 (scripts/experiment_extremeness.py; see memory account-c-extremeness-analysis). T=1.0 disables sharpening.",
+  "sharpen_T": 1.25
+}

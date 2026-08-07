@@ -1,0 +1,21 @@
+# Exact versions from the reference environment (Python 3.11).
+# `pyproject.toml` is the source of truth for dependency *ranges*;
+# this file pins what was actually verified, for exact reproduction:
+#   pip install -r requirements.lock && pip install -e . --no-deps
+beautifulsoup4==4.14.3
+catboost==1.2.10
+cryptography==48.0.0
+jax==0.10.0
+joblib==1.5.3
+nbformat==5.10.4
+numpy==2.4.4
+numpyro==0.21.0
+pandas==3.0.3
+pyarrow==24.0.0
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.2
+rapidfuzz==3.14.5
+requests==2.34.0
+scikit-learn==1.8.0
+scipy==1.17.1
+tqdm==4.67.3

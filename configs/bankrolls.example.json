@@ -1,0 +1,15 @@
+{
+  "_format_version": 2,
+  "_note": "Template. Copy to bankrolls.json and set your own starting capital. The real file is gitignored — it holds live balances and per-card betting state.",
+  "A": 100.0,
+  "B": 100.0,
+  "C": 100.0,
+  "card_state": {
+    "card_date": null,
+    "baseline_set_at": null,
+    "fights_excluded": [],
+    "fights_provisional": {}
+  },
+  "last_synced": null,
+  "last_updated": null
+}

@@ -1,0 +1,86 @@
+[project]
+name = "ufc-pred"
+version = "0.1.0"
+description = "Calibrated UFC fight outcome prediction model for EV betting"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # data
+    "numpy>=2.0,<3",
+    "pandas>=2.2,<4",
+    "pyarrow>=16",
+    "python-dateutil>=2.9",
+    # modeling
+    "catboost>=1.2,<2",
+    "scikit-learn>=1.5,<2",
+    "scipy>=1.13,<2",
+    "joblib>=1.4",
+    # Bayesian skill model
+    "numpyro>=0.15",
+    "jax>=0.4",
+    # ingest
+    "requests>=2.32",
+    "beautifulsoup4>=4.12",
+    "rapidfuzz>=3.9",
+    "cryptography>=42",     # RSA request signing for the Kalshi API
+    # misc
+    "tqdm>=4.66",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+notebooks = [
+    "jupyterlab",
+    "ipykernel",
+    "nbformat",
+    "matplotlib",
+    "seaborn",
+]
+dev = [
+    "ruff",
+    "pytest",
+    "pytest-cov",
+    "nbstripout",
+    "pre-commit",
+]
+
+[project.scripts]
+ufc-preview = "ufc_pred.cli.preview_next_card:main"
+ufc-predict = "ufc_pred.cli.predict_bet:main"
+ufc-runner = "ufc_pred.cli.bet_runner:main"
+ufc-update = "ufc_pred.cli.update_ufcstats:main"
+ufc-bankrolls = "ufc_pred.cli.update_bankrolls:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+# 110 rather than the more common 88/100: this codebase prints wide aligned
+# tables and multi-field diagnostic lines, and breaking those f-strings across
+# lines hurts readability more than the extra columns do.
+line-length = 110
+target-version = "py311"
+extend-exclude = [".conda", "notebooks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Research scripts are one-shot analyses preserved as a record of what was run,
+# not library code. They keep straight-line top-level flow (E402), dense report
+# formatting (E501), and loop-scoped closures (B023) on purpose.
+"scripts/research/*" = ["E402", "E501", "B023", "B007"]
+"scripts/tools/*" = ["E402", "E501", "B023", "B007"]
+# Entry points must load .env before importing modules that read the environment.
+"src/ufc_pred/cli/*" = ["E402"]
+# Tests embed verbatim HTML fixtures that must not be reflowed.
+"tests/test_upcoming_feature_state.py" = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+addopts = "-ra -q"

@@ -1,0 +1,17 @@
+* text=auto eol=lf
+
+# Notebook outputs are stripped before commit (see .pre-commit-config.yaml).
+*.ipynb filter=nbstripout
+*.ipynb diff=ipynb
+
+# Keep binary formats out of textual diffs.
+*.parquet binary
+*.joblib binary
+*.pkl binary
+*.npz binary
+*.png binary
+
+# Exclude support files from GitHub's language statistics so the repo reports
+# as Python rather than Jupyter Notebook.
+*.ipynb linguist-documentation
+docs/* linguist-documentation

@@ -1,0 +1,83 @@
+# Directory patterns are ROOT-ANCHORED with a leading slash on purpose.
+# An unanchored `models/` matches *any* directory named models at any depth —
+# which silently excludes the src/ufc_pred/models/ source package.
+
+# ── Data: never commit raw or processed datasets ──
+# (ignore every file under data/, but keep the directory skeleton via .gitkeep;
+#  `!/data/**/` is required so git still descends into the subdirectories)
+/data/**
+!/data/**/
+!/data/**/.gitkeep
+
+# ── Models / artifacts (generated) ──
+/artifacts/
+/models/
+*.pkl
+*.joblib
+*.pt
+*.ckpt
+*.npz
+
+# ── Personal / financial state ──
+/configs/bankrolls.json
+!/configs/bankrolls.example.json
+/configs/launchd/*.plist
+!/configs/launchd/*.plist.template
+*_fills.json
+*_idempotency.json*
+
+# ── Env / secrets ──
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+/build/
+/dist/
+.venv/
+venv/
+/.conda/
+.python-version
+
+# ── Notebooks ──
+.ipynb_checkpoints/
+
+# ── Experiment tracking ──
+/wandb/
+/mlruns/
+/experiments/
+
+# ── Logs & backups ──
+*.log
+*.bak
+*.bak_*
+*.orig
+
+# ── OS / editor / agent ──
+.DS_Store
+.vscode/
+.idea/
+
+# ── Tooling caches ──
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ── Internal working docs (kept locally, not published) ──
+/PLAN.md
+/PLAN_AUTO_BET.md
+/STATUS.md
+/DEPLOY.md
+/METRICS_AUDIT.md
+/FEATURE_PARITY_AUDIT.md
+/TENNIS_PORTED_FINDINGS.md
+/TENNIS_PORTED_IDEAS.md
+/PUBLIC_RELEASE_PLAN.md
