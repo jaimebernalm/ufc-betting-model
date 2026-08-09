@@ -157,9 +157,14 @@ def _same_person(a: str, b: str) -> bool:
     pa, pb = _name_parts(a), _name_parts(b)
     if not pa or not pb:
         return False
-    ka, kb = "".join(pa), "".join(pb)
-    if ka == kb or ka.startswith(kb) or kb.startswith(ka):
+    # Whole-name equality once spacing is removed: "Yadier del Valle" ==
+    # "Yadier Delvalle". Deliberately NOT a prefix test — "Li Jing" is a
+    # prefix of "Li Jingliang" but they are different fighters.
+    if "".join(pa) == "".join(pb):
         return True
+    # Two shared name tokens: "Ravena Oliveira" / "Ravena Oliveira Morais".
+    # Requiring two keeps a shared surname alone ("Ty Miller" / "Juliana
+    # Miller") from matching.
     return len(set(pa) & set(pb)) >= 2
 
 
