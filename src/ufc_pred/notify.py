@@ -11,6 +11,7 @@ A separate CLI mode lets you smoke-test the wiring:
 from __future__ import annotations
 
 import os
+import ssl
 import subprocess
 import sys
 import urllib.error
@@ -20,6 +21,21 @@ import urllib.request
 def _osa_escape(s: str) -> str:
     """Escape a string for inclusion in an osascript string literal."""
     return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _ssl_context() -> ssl.SSLContext | None:
+    """CA bundle for the ntfy POST, independent of the interpreter's build.
+
+    A conda env bakes an absolute CA path in at build time, so renaming the
+    directory above it silently breaks every HTTPS verify from that env.
+    certifi ships with requests (a hard dependency), so prefer it and fall
+    back to the stdlib default if it is somehow missing.
+    """
+    try:
+        import certifi
+    except ImportError:
+        return None
+    return ssl.create_default_context(cafile=certifi.where())
 
 
 def push_phone(
@@ -54,7 +70,7 @@ def push_phone(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=5):
+        with urllib.request.urlopen(req, timeout=5, context=_ssl_context()):
             return True
     except (urllib.error.URLError, OSError, ValueError) as e:
         print(f"[notify] ntfy push failed: {e}", file=sys.stderr)

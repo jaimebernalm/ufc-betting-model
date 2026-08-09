@@ -94,6 +94,7 @@ FIGHTS_PATH = PROCESSED / "fights.parquet"
 BANKROLLS_PATH = CONFIGS / "bankrolls.json"
 NOTIF_DIR = PROCESSED / "bet_notifications"
 IDEMPOTENCY_PATH = PROCESSED / "bet_runner_idempotency.json"
+TICKER_CACHE_PATH = PROCESSED / "kalshi_ticker_cache.json"
 
 EARLIEST_CAPTURE_MIN = 90  # never capture earlier than T-90min (nb09 price quality)
 FIRST_FIGHT_CAPTURE_MIN = 60  # card opener fires at T-60 (no prior fight to wait for)
@@ -131,14 +132,40 @@ _FULLNAME_ALIASES = {
 }
 
 
+def _name_parts(s: str) -> list[str]:
+    """Folded, suffix-stripped name tokens (hyphens treated as spaces)."""
+    folded = _FULLNAME_ALIASES.get(_fold(s), _fold(s)).replace("-", " ")
+    return [p for p in folded.split() if p.rstrip(".") not in _NAME_SUFFIXES]
+
+
 def _surname(s: str) -> str:
-    folded = _FULLNAME_ALIASES.get(_fold(s), _fold(s))
-    # Hyphenated surnames are inconsistently hyphenated across sources
-    # (UFC.com "Benoît Saint Denis" vs Kalshi "Benoit Saint-Denis") — split
-    # on hyphens too so both sides resolve to the same last token.
-    folded = folded.replace("-", " ")
-    parts = [p for p in folded.split() if p.rstrip(".") not in _NAME_SUFFIXES]
+    parts = _name_parts(s)
     return parts[-1] if parts else ""
+
+
+def _same_person(a: str, b: str) -> bool:
+    """Loose identity test for ONE fighter named by two different sources.
+
+    Handles the two ways sources disagree that last-token comparison cannot:
+      * a trailing extra surname — "Ravena Oliveira" / "Ravena Oliveira Morais",
+        "Carol Foro" / "Carol Foro Antunes", "José Montanha" / "Jose Montanha
+        Da Silva"
+      * spaces in a compound surname — "Yadier del Valle" / "Yadier Delvalle"
+
+    Deliberately loose; callers must guard against ambiguity themselves.
+    """
+    pa, pb = _name_parts(a), _name_parts(b)
+    if not pa or not pb:
+        return False
+    # Whole-name equality once spacing is removed: "Yadier del Valle" ==
+    # "Yadier Delvalle". Deliberately NOT a prefix test — "Li Jing" is a
+    # prefix of "Li Jingliang" but they are different fighters.
+    if "".join(pa) == "".join(pb):
+        return True
+    # Two shared name tokens: "Ravena Oliveira" / "Ravena Oliveira Morais".
+    # Requiring two keeps a shared surname alone ("Ty Miller" / "Juliana
+    # Miller") from matching.
+    return len(set(pa) & set(pb)) >= 2
 
 
 def match_kalshi(
@@ -159,6 +186,22 @@ def match_kalshi(
         if {ufc_a_surname, ufc_b_surname} == {kal_a_surname, kal_b_surname}:
             swap = kal_a_surname == ufc_b_surname
             return kal, swap
+
+    # Fallback: last-token comparison misses when a source carries an extra
+    # trailing surname or spaces a compound one differently, which silently
+    # produced "not on Kalshi" alerts for live, tradeable markets. Retry with
+    # the looser per-fighter test — but accept ONLY a unique hit. Two "Miller"
+    # fights on one card is normal (2026-08-08 had Ty Miller AND Juliana
+    # Miller), so on any ambiguity send nothing rather than alert on the wrong
+    # fight.
+    candidates: list[tuple[CardFight, bool]] = []
+    for kal in kalshi_card:
+        if _same_person(fight.fighter_a, kal.fighter_a) and _same_person(fight.fighter_b, kal.fighter_b):
+            candidates.append((kal, False))
+        elif _same_person(fight.fighter_a, kal.fighter_b) and _same_person(fight.fighter_b, kal.fighter_a):
+            candidates.append((kal, True))
+    if len(candidates) == 1:
+        return candidates[0]
     return None
 
 
@@ -185,6 +228,40 @@ def load_idempotency() -> dict:
 def save_idempotency(log: dict) -> None:
     IDEMPOTENCY_PATH.parent.mkdir(parents=True, exist_ok=True)
     IDEMPOTENCY_PATH.write_text(json.dumps(log, indent=2, sort_keys=True))
+
+
+# ---------------------------------------------------------------------------
+# Kalshi ticker cache
+# ---------------------------------------------------------------------------
+# fetch_next_card only yields events whose list_markets returns exactly two
+# markets, and Kalshi stops returning a fight's markets once it resolves. So a
+# fight DISAPPEARS from `kalshi_card` at the moment it resolves — which is
+# exactly the moment the next fight needs to poll it to fire `prev_resolved`.
+# Because every fight's predecessor is by definition the one that just
+# resolved, the fast path degrades for the whole remainder of a card and every
+# bet falls back to the T-25 scheduled clock (2026-08-08: too late on a card
+# running ahead of schedule).
+#
+# Remembering token_a while the fight is still listed keeps a delisted
+# predecessor pollable. Cheap, and never blocks: any failure degrades to
+# exactly the previous behaviour.
+
+
+def load_ticker_cache() -> dict:
+    if not TICKER_CACHE_PATH.exists():
+        return {}
+    try:
+        return json.loads(TICKER_CACHE_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_ticker_cache(cache: dict) -> None:
+    try:
+        TICKER_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        TICKER_CACHE_PATH.write_text(json.dumps(cache, indent=1, sort_keys=True))
+    except OSError as e:
+        print(f"  [ticker-cache] write failed: {e}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -381,16 +458,70 @@ def process_one(
         print(f"    → {result['summary_line']}")
         print(f"    record: {record_path.relative_to(ROOT)}")
 
+    # An upstream outage is not a verdict on this fight. Burning the
+    # idempotency key on a transient failure silently forfeits the bet for the
+    # rest of the card (2026-08-08: a single ufcstats 502 killed Elkins vs del
+    # Valle; the site was back up seconds later). Retry those instead, but
+    # alert only once so an outage doesn't notify every tick.
+    transient = _is_transient_error(result)
+    err_key = f"{key}#transient_error_notified"
+    if transient and err_key in idempotency:
+        if verbose:
+            print(f"    [transient] {key}: still failing upstream, will retry quietly")
+        return {"key": key, "result": "transient_error", "summary": result["summary_line"]}
+
     title, subtitle, msg = build_notification(
         fight, kalshi, result, dry_run=dry_run, late=late, cash_short=cash_short
     )
     notify(title, subtitle, msg)
 
     if not dry_run:
-        idempotency[key] = now.isoformat()
+        # Transient: record only that we alerted, leaving `key` unset so the
+        # next tick retries. Permanent (e.g. debutant with no history): burn
+        # `key`, since retrying can never succeed.
+        idempotency[err_key if transient else key] = now.isoformat()
         save_idempotency(idempotency)
 
+    if transient:
+        return {"key": key, "result": "transient_error", "summary": result["summary_line"]}
     return {"key": key, "result": "notified", "summary": result["summary_line"]}
+
+
+# Substrings that mark a capture failure as upstream/network weather rather
+# than a permanent fact about the fight. Matched case-insensitively against the
+# error text. Kept deliberately narrow: anything not listed here burns the
+# idempotency key, so a genuine dead end (e.g. "No fighter match" for a
+# debutant) still fires exactly once instead of retrying every tick forever.
+_TRANSIENT_ERROR_MARKERS = (
+    "500 server error",
+    "502",
+    "503",
+    "504",
+    "bad gateway",
+    "service unavailable",
+    "gateway time-out",
+    "gateway timeout",
+    "timed out",
+    "timeout",
+    "connection aborted",
+    "connection reset",
+    "connection error",
+    "remote end closed",
+    "max retries",
+    "temporarily unavailable",
+)
+
+
+def _is_transient_error(result: dict) -> bool:
+    """True when a capture failed for upstream reasons and should be retried.
+
+    Retry-safe by construction: only an errored capture can be transient, and
+    only when the message matches a known-upstream marker.
+    """
+    if result.get("status") != "error":
+        return False
+    err = str(result.get("error") or "").lower()
+    return any(m in err for m in _TRANSIENT_ERROR_MARKERS)
 
 
 # ---------------------------------------------------------------------------
@@ -595,6 +726,21 @@ def run(args: argparse.Namespace) -> int:
     if verbose:
         print(f"Kalshi: fetched {len(kalshi_card)} fights")
 
+    # Remember every ticker we can still see, so a fight stays pollable after
+    # it resolves and drops out of fetch_next_card (see TICKER_CACHE_PATH).
+    ticker_cache = load_ticker_cache()
+    _cache_dirty = False
+    for _f in schedule:
+        _m = match_kalshi(_f, kalshi_card)
+        if _m is None:
+            continue
+        _k = make_fight_key(event["date"], _f)
+        if ticker_cache.get(_k) != _m[0].token_a:
+            ticker_cache[_k] = _m[0].token_a
+            _cache_dirty = True
+    if _cache_dirty:
+        save_ticker_cache(ticker_cache)
+
     idempotency = load_idempotency()
 
     try:
@@ -625,6 +771,16 @@ def run(args: argparse.Namespace) -> int:
         # (stale guard) and as the next fight's "prev" — cache to halve API load.
         _resolution_memo: dict[str, object] = {}
 
+        def _fight_token(f: FightSchedule) -> str | None:
+            """This fight's Kalshi token_a, from the live card if it is still
+            listed and otherwise from the ticker cache. A resolved fight is
+            dropped by fetch_next_card, so the cache is what keeps the
+            `prev_resolved` fast path alive for the rest of the card."""
+            matched = match_kalshi(f, kalshi_card)
+            if matched is not None:
+                return matched[0].token_a
+            return ticker_cache.get(make_fight_key(event["date"], f))
+
         def resolve_prev(prev: FightSchedule):
             memo_key = make_fight_key(event["date"], prev)
             if memo_key in _resolution_memo:
@@ -644,13 +800,13 @@ def run(args: argparse.Namespace) -> int:
                     )
                 return ("ufc_result", True)
             # 2) Kalshi market signals (settled / closed / legacy pin).
-            prev_matched = match_kalshi(prev, kalshi_card)
-            if prev_matched is None:
+            prev_token = _fight_token(prev)
+            if prev_token is None:
                 return None  # can't poll; fallback_time covers it
             try:
                 res = market_resolution(
                     resolution_client,
-                    prev_matched[0].token_a,
+                    prev_token,
                     fight_start_utc=prev.start_time_utc,
                     now_utc=now,
                 )
@@ -673,11 +829,11 @@ def run(args: argparse.Namespace) -> int:
             fallback fire."""
             if resolution_client is None:
                 return False
-            prev_matched = match_kalshi(prev, kalshi_card)
-            if prev_matched is None:
+            prev_token = _fight_token(prev)
+            if prev_token is None:
                 return False
             try:
-                m = resolution_client.get_market(prev_matched[0].token_a)
+                m = resolution_client.get_market(prev_token)
             except Exception as e:
                 print(
                     f"  [delay-gate] error polling {prev.fighter_a} vs {prev.fighter_b}: {e}",

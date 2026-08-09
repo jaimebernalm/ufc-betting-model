@@ -53,6 +53,15 @@ _ALIASES = {
     "Sharabutdin Magomedov": "Shara Magomedov",  # legal name vs nickname; Middleweight
     "Abusupiyan Magomedov": "Abus Magomedov",  # legal name vs nickname; Middleweight
     "Cong Wang": "Wang Cong",  # Western vs Chinese name order; W, 5 fights in history
+    "Yadier Delvalle": "Yadier del Valle",  # feed drops the space in "del Valle"; FW, 3 fights
+    "Billy Goff": "Billy Ray Goff",  # feed drops the middle name; WW, 3 fights
+    "Ravena Oliveira Morais": "Ravena Oliveira",  # feed appends 2nd surname; W-FLW, 3 fights
+    # DANGEROUS FALSE POSITIVE, do not remove: difflib scores "Ty Cole Miller"
+    # against "Cole Miller" (retired FW, 2010-2016) at 0.88 — above the 0.85
+    # cutoff — so without this alias it silently resolves to the wrong fighter
+    # and prices the bet on 12 fights of the wrong record. Correct man is
+    # "Ty Miller", WW, debut 2026-01-24.
+    "Ty Cole Miller": "Ty Miller",
 }
 
 
