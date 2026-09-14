@@ -18,14 +18,10 @@ card-open (all bets on a card sized off the card-opening bankroll) with a
 
 from __future__ import annotations
 
-from pathlib import Path
+import argparse
 
 import numpy as np
 import pandas as pd
-
-ROOT = Path(__file__).resolve().parent.parent
-
-import argparse
 
 from ufc_pred.backtest.strategy_grid import (  # noqa: E402
     EDGE_THR,
@@ -36,6 +32,7 @@ from ufc_pred.backtest.strategy_grid import (  # noqa: E402
 )
 from ufc_pred.features.skill_v3_pipeline import OUTPUT as SKILL_V3_PARQUET  # noqa: E402
 from ufc_pred.ingest.kaggle_mdabbert import HISTORY_PARQUET  # noqa: E402
+from ufc_pred.paths import ROOT
 
 _ap = argparse.ArgumentParser()
 _ap.add_argument("--window", choices=["main", "earlier"], default="main")

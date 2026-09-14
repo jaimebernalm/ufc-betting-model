@@ -10,18 +10,16 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from pathlib import Path
 
 import joblib
 import numpy as np
 import pandas as pd
 from rapidfuzz import fuzz
 
-ROOT = Path(__file__).resolve().parents[1]
-
 from ufc_pred.features.skill_v3_pipeline import OUTPUT as SKILL_V3_PARQUET
 from ufc_pred.features.static_v1 import prepare
 from ufc_pred.ingest.kaggle_mdabbert import HISTORY_PARQUET
+from ufc_pred.paths import ROOT
 
 APOSTROPHES = "'’ʼ`‘"
 

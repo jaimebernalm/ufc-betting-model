@@ -7,11 +7,7 @@ appends to the existing parquet.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pandas as pd
-
-ROOT = Path(__file__).resolve().parents[1]
 
 from ufc_pred.features.skill_v3 import (
     build_index,

@@ -29,9 +29,8 @@ from ufc_pred.features.static_v1 import _swap_red_blue
 from ufc_pred.inference.skill_for_upcoming import attach_skill_for_upcoming
 from ufc_pred.inference.upcoming_builder import _DIFF_PAIRS
 from ufc_pred.ingest.kaggle_mdabbert import HISTORY_PARQUET
-from ufc_pred.paths import METRICS
+from ufc_pred.paths import METRICS, ROOT
 
-ROOT = Path(__file__).resolve().parents[1]
 CUTOFF = pd.Timestamp("2025-11-30")
 RATE_COLS = [
     "avg_SIG_STR_landed",

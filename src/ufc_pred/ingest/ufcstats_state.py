@@ -17,6 +17,7 @@ from difflib import get_close_matches
 import pandas as pd
 from bs4 import BeautifulSoup
 
+from .identity import PROFILE_URLS, canonical
 from .ufcstats_client import UFCStatsClient
 from .ufcstats_scraper import FighterStats, parse_fighter_page
 
@@ -118,15 +119,41 @@ class UFCStatsStateSource:
             links = [a for a in row.find_all("a", href=True) if "fighter-details/" in a["href"]]
             if not links:
                 continue
-            visible = [a.get_text(" ", strip=True) for a in links if a.get_text(" ", strip=True)]
-            if len(visible) < 2:
+            # Columns are (First, Last, Nickname, ...) and EVERY one wraps its
+            # own link, so compacting the non-empty link texts mis-reads every
+            # fighter UFCStats files under a single name -- the First cell is
+            # empty for all of them.  "Maheshate" (no nickname) yielded one
+            # visible text and was dropped outright; "Sumudaerji" (nickname
+            # "The Tibetan Eagle") keyed as "Sumudaerji The Tibetan Eagle".
+            # Both then failed lookup entirely, which on 2026-08-28/29 killed
+            # the Maheshate and Perez vs Sumudaerji captures.  Read the two
+            # name cells positionally and leave the nickname column alone.
+            cells = row.find_all("td")
+            if len(cells) < 2:
                 continue
-            full_name = f"{visible[0]} {visible[1]}".strip()
-            index[_normalise_name(full_name)] = links[0]["href"]
+            full_name = " ".join(
+                t
+                for t in (
+                    cells[0].get_text(" ", strip=True),
+                    cells[1].get_text(" ", strip=True),
+                )
+                if t
+            )
+            if not full_name:
+                continue
+            key = _normalise_name(full_name)
+            url = links[0]["href"]
+            if key in index and index[key] != url:
+                index[key] = None  # homonym: never silently overwrite a person
+            else:
+                index[key] = url
         self._index_cache[char] = index
         return index
 
     def fighter_url(self, fighter: str) -> str:
+        fighter = canonical(fighter)
+        if fighter in PROFILE_URLS:
+            return PROFILE_URLS[fighter]
         key = _normalise_name(fighter)
         parts = key.split()
         # Compound surnames are not alphabetized consistently ("Saint Denis"
@@ -137,12 +164,16 @@ class UFCStatsStateSource:
         for char in chars:
             index = self._index_for_char(char)
             if key in index:
+                if index[key] is None:
+                    raise ValueError(f"Ambiguous UFCStats identity: {fighter!r}")
                 return index[key]
             candidates.update(index)
         matches = get_close_matches(key, list(candidates), n=1, cutoff=0.86)
         if not matches:
             raise ValueError(f"No UFCStats profile match for {fighter!r}")
-        return candidates[matches[0]]
+        raise ValueError(
+            f"Unverified UFCStats identity {fighter!r}; candidate {matches[0]!r} needs an explicit alias"
+        )
 
     def get_state(self, fighter: str, fight_date: pd.Timestamp) -> dict[str, object]:
         target = (

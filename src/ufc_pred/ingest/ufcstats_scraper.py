@@ -423,6 +423,19 @@ def _fight_seconds(round_text: str, time_text: str) -> int:
     return 300 * (round_ - 1) + 60 * minutes + seconds
 
 
+def _is_ufc_history_event(name: str) -> bool:
+    """Match the UFC event universe used by the historical raw export.
+
+    Fighter pages can also contain DWCS/other-promotion appearances. Including
+    those only in live stats creates a systematic train/serve distribution gap.
+    """
+    name = name.strip()
+    return (
+        name.startswith(("UFC", "The Ultimate Fighter", "Noche UFC"))
+        or name == "Ortiz vs Shamrock 3: The Final Chapter"
+    )
+
+
 def _pre_event_career_rates(
     bs: BeautifulSoup,
     event_date: datetime,
@@ -450,6 +463,8 @@ def _pre_event_career_rates(
     for row in bs.find_all("tr", {"class": "b-fight-details__table-row"}):
         cols = row.find_all("p", {"class": "b-fight-details__table-text"})
         if len(cols) < 17:
+            continue
+        if not _is_ufc_history_event(cols[11].get_text(" ", strip=True)):
             continue
         try:
             bout_date = pd.Timestamp(parse_date(cols[12].get_text(strip=True)))
@@ -581,6 +596,8 @@ def parse_fighter_page(
         cols = row.find_all("p", {"class": "b-fight-details__table-text"})
         if len(cols) < 17:
             continue
+        if not _is_ufc_history_event(cols[11].get_text(" ", strip=True)):
+            continue
         result = cols[0].get_text(strip=True).lower()  # 'win'/'loss'/'draw'/'nc'
         if not result:
             continue
@@ -605,6 +622,17 @@ def parse_fighter_page(
 
         # Method (col 13): U-DEC, S-DEC, M-DEC, KO/TKO, SUB
         method = cols[13].get_text(strip=True)
+        # The profile summary labels medical stoppages as KO/TKO. The bout
+        # detail has the specific method used by the historical raw export.
+        if result == "win" and method == "KO/TKO" and fight_html_getter is not None:
+            detail_url = row.get("data-link")
+            if not detail_url:
+                link = row.find("a", href=re.compile(r"fight-details/"))
+                detail_url = link.get("href") if link is not None else None
+            if detail_url:
+                detail = BeautifulSoup(fight_html_getter(detail_url), "html.parser")
+                if re.search(r"Method:\s*TKO\s*-\s*Doctor", detail.get_text(" ", strip=True), re.I):
+                    method = "TKO - Doctor's Stoppage"
         if result == "win":
             if method == "M-DEC":
                 by_maj += 1

@@ -61,7 +61,7 @@ def test_raw_career_rates_exclude_target_bout_and_use_attempt_denominators():
       <td><p class="b-fight-details__table-text">30</p><p class="b-fight-details__table-text">10</p></td>
       <td><p class="b-fight-details__table-text">2</p><p class="b-fight-details__table-text">0</p></td>
       <td><p class="b-fight-details__table-text">1</p><p class="b-fight-details__table-text">0</p></td>
-      <td><p class="b-fight-details__table-text">Event</p></td>
+      <td><p class="b-fight-details__table-text">UFC Test Event</p></td>
       <td><p class="b-fight-details__table-text">Jan. 01, 2025</p></td>
       <td><p class="b-fight-details__table-text">U-DEC</p></td>
       <td><p class="b-fight-details__table-text">unused</p></td>
@@ -142,3 +142,43 @@ def test_event_row_does_not_subtract_current_title_bout_twice():
     assert built["B_total_title_bouts"] == 1
     assert built["total_title_bout_dif"] == 0
     assert built["R_win_by_TKO_Doctor_Stoppage"] == 1
+
+
+_FIGHTER_LIST_HTML = """
+<table><tbody>
+  <tr><th>First</th><th>Last</th><th>Nickname</th></tr>
+  <tr>
+    <td><a href="http://ufcstats.com/fighter-details/aaa">Alex</a></td>
+    <td><a href="http://ufcstats.com/fighter-details/aaa">Morono</a></td>
+    <td><a href="http://ufcstats.com/fighter-details/aaa">Great Ape</a></td>
+  </tr>
+  <tr>
+    <td><a href="http://ufcstats.com/fighter-details/bbb"></a></td>
+    <td><a href="http://ufcstats.com/fighter-details/bbb">Maheshate</a></td>
+    <td><a href="http://ufcstats.com/fighter-details/bbb"></a></td>
+  </tr>
+  <tr>
+    <td><a href="http://ufcstats.com/fighter-details/ccc"></a></td>
+    <td><a href="http://ufcstats.com/fighter-details/ccc">Sumudaerji</a></td>
+    <td><a href="http://ufcstats.com/fighter-details/ccc">The Tibetan Eagle</a></td>
+  </tr>
+</tbody></table>
+"""
+
+
+def test_fighter_index_keys_mononyms_by_name_not_nickname():
+    """UFCStats files some fighters under a single name, leaving the First cell
+    empty. Compacting the non-empty link texts dropped "Maheshate" (one visible
+    text) and keyed "Sumudaerji" as "sumudaerji the tibetan eagle" — both then
+    failed lookup, killing the 2026-08-28 and 2026-08-29 captures."""
+    from ufc_pred.ingest.ufcstats_state import UFCStatsStateSource
+
+    src = UFCStatsStateSource(html_getter=lambda url: _FIGHTER_LIST_HTML)
+    assert src.fighter_url("Maheshate").endswith("/bbb")
+    assert src.fighter_url("Sumudaerji").endswith("/ccc")
+    # Kalshi spaces the name; normalisation must still land on the same profile.
+    assert src.fighter_url("Su Mudaerji").endswith("/ccc")
+    # Ordinary two-name fighters are unaffected, and the nickname column never
+    # becomes part of the key.
+    assert src.fighter_url("Alex Morono").endswith("/aaa")
+    assert "great ape" not in " ".join(src._index_for_char("m"))

@@ -15,11 +15,11 @@ import argparse
 import os
 import sys
 from datetime import datetime
-from pathlib import Path
 
 from dotenv import load_dotenv
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from ufc_pred.paths import ROOT as REPO_ROOT
+
 load_dotenv(REPO_ROOT / ".env")
 
 

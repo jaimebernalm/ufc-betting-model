@@ -19,9 +19,9 @@ import shlex
 import subprocess
 import sys
 import time
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+from ufc_pred.paths import ROOT
+
 LOG_DIR = ROOT / "artifacts"
 
 

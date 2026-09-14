@@ -24,6 +24,16 @@ def load_upcoming() -> pd.DataFrame:
     return _clean(df, require_winner=False)
 
 
+# Fighters the upstream feed spells two different ways across eras, splitting
+# one career into two partial records. Left as-is, the most recent spelling
+# resolves and silently carries only the fights filed under it: "Su Mudaerji"
+# holds 2018-2021 (4 fights) and "Sumudaerji" 2022-2026 (6), so whichever one
+# a live name matched priced the bet on well under half his record.
+_HISTORY_NAME_CANONICAL = {
+    "Su Mudaerji": "Sumudaerji",
+}
+
+
 def _clean(df: pd.DataFrame, *, require_winner: bool = True) -> pd.DataFrame:
     df = df.copy()
     df.columns = [c.strip() for c in df.columns]
@@ -31,10 +41,10 @@ def _clean(df: pd.DataFrame, *, require_winner: bool = True) -> pd.DataFrame:
     df = df.dropna(subset=["date", "R_fighter", "B_fighter"])
 
     if require_winner:
-        df = df[df["Winner"].isin(["Red", "Blue", "Draw"])]
+        df = df[df["Winner"].isin(["Red", "Blue", "Draw", "NC"])]
 
     for col in ("R_fighter", "B_fighter"):
-        df[col] = df[col].str.strip()
+        df[col] = df[col].str.strip().replace(_HISTORY_NAME_CANONICAL)
 
     df = df.sort_values("date").reset_index(drop=True)
     return df

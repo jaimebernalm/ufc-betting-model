@@ -246,7 +246,7 @@ def fetch_card_schedule(
         ("prelims-card", prelim_start, "prelim"),
         ("main-card", main_start, "main_card"),
     ]:
-        section = soup.find(id=section_id)
+        section = soup.find(id=re.compile(r"^" + re.escape(section_id) + r"(?:--\d+)?$"))
         if not section:
             continue
         out.extend(_parse_section_fights(section, section_start_utc=start_utc, card_position=label))

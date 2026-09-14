@@ -11,9 +11,9 @@ arms so this isolates the reconstruction, not the skill posterior.
 
 import sys
 import warnings
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+from ufc_pred.paths import ROOT
+
 warnings.filterwarnings("ignore")
 import joblib
 import numpy as np

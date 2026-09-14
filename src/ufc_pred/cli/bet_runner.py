@@ -100,6 +100,7 @@ EARLIEST_CAPTURE_MIN = 90  # never capture earlier than T-90min (nb09 price qual
 FIRST_FIGHT_CAPTURE_MIN = 60  # card opener fires at T-60 (no prior fight to wait for)
 FALLBACK_BEFORE_START_MIN = 25  # capture by T-25min even if prev fight unresolved
 STALE_AFTER_START_MIN = 15  # past scheduled start + this -> too late, skip
+# Restored to 14 days after verified backfill on 2026-09-14.
 MAX_HISTORY_AGE_DAYS = 14  # refuse to bet if fights.parquet is older than this
 
 
@@ -129,6 +130,18 @@ _NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
 # matcher needs "oliveira", not "matos"). Suffix-stripping can't fix these.
 _FULLNAME_ALIASES = {
     "vinicius de oliveira prestes de matos": "vinicius oliveira",
+    # UFC 330. Kyrgyz patronymic "Uulu" ("son of") plus an i/y transliteration
+    # split on the surname, so no two tokens are shared and the loose test
+    # fails: UFC.com "Myktybek Orolbai" / Kalshi "Myktybek Orolbay Uulu".
+    "myktybek orolbay uulu": "myktybek orolbai",
+    # UFC 330. Kalshi lists the full legal name, UFC.com the ring name
+    # ("Chapolin") — zero shared tokens beyond the first name. Identity is
+    # pinned by elimination: exactly one market has Charles Johnson.
+    "eduardo henrique da silva dos santos": "eduardo chapolin",
+    # 2026-08-29. Kalshi splits and reverses the single name "Aoriqileng" into
+    # "Qileng Aori", leaving zero shared tokens, so both the surname test and
+    # the loose fallback miss and the fight reports as "not on Kalshi".
+    "qileng aori": "aoriqileng",
 }
 
 
@@ -270,9 +283,24 @@ def save_ticker_cache(cache: dict) -> None:
 
 
 def write_record(date: pd.Timestamp, key: str, payload: dict) -> Path:
-    NOTIF_DIR.mkdir(parents=True, exist_ok=True)
-    path = NOTIF_DIR / f"{key}.json"
-    path.write_text(json.dumps(payload, indent=2, default=str))
+    directory = (
+        NOTIF_DIR
+        if payload.get("mode") == "shadow"
+        else NOTIF_DIR / "dry_run"
+        if payload.get("dry_run")
+        else NOTIF_DIR
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{key}.json"
+    # Preserve every capture; retries must not erase evidence of earlier decisions.
+    if path.exists():
+        from uuid import uuid4
+
+        directory = directory / "revisions"
+        directory.mkdir(exist_ok=True)
+        path = directory / f"{key}_{uuid4().hex}.json"
+    with path.open("x") as handle:
+        handle.write(json.dumps(payload, indent=2, default=str))
     return path
 
 
@@ -354,11 +382,13 @@ def process_one(
     trigger: str = "",
     kalshi_client: KalshiClient | None = None,
     state_source: UFCStatsStateSource | None = None,
+    shadow: bool = False,
+    models_dir=None,
 ) -> dict:
     """Run one fight through the full pipeline. Returns a small status dict."""
     key = make_fight_key(event["date"], fight)
 
-    if not dry_run and key in idempotency:
+    if (not dry_run or shadow) and key in idempotency:
         if verbose:
             print(f"  [skip] {key}: already notified at {idempotency[key]}")
         return {"key": key, "result": "already_notified"}
@@ -380,6 +410,20 @@ def process_one(
             )
             idempotency[nm_key] = now.isoformat()
             save_idempotency(idempotency)
+        if shadow and nm_key not in idempotency:
+            write_record(
+                event["date"],
+                key,
+                {
+                    "mode": "shadow",
+                    "dry_run": True,
+                    "captured_at_utc": now.isoformat(),
+                    "fight": {"fighter_a_ufc": fight.fighter_a, "fighter_b_ufc": fight.fighter_b},
+                    "recommendation": {"status": "skip", "error": "no matching market", "orders": {}},
+                },
+            )
+            idempotency[nm_key] = now.isoformat()
+            save_idempotency(idempotency)
         return {"key": key, "result": "no_market"}
 
     kalshi, swap = matched
@@ -391,6 +435,21 @@ def process_one(
         )
         print(f"    Kalshi: {kalshi.market_id}  (swap={swap})")
 
+    available_cash = None
+    if kalshi_client is not None:
+        try:
+            balance = kalshi_client.get_balance()
+            available_cash = float(balance.get("balance_dollars", balance.get("balance", 0) / 100.0))
+            from ufc_pred.ops.fills import FILLS_PATH
+            from ufc_pred.ops.reservations import pending_cash
+
+            fills = json.loads(FILLS_PATH.read_text()) if FILLS_PATH.exists() else {}
+            if not shadow:
+                available_cash = max(
+                    0.0, available_cash - pending_cash(NOTIF_DIR, kalshi_client, fills=fills)
+                )
+        except Exception as exc:
+            raise RuntimeError(f"Cannot establish executable cash budget: {exc}") from exc
     result = predict_one_fight(
         kalshi,
         fights_df,
@@ -400,6 +459,9 @@ def process_one(
         title_bout=fight.title_bout,
         no_of_rounds=fight.no_of_rounds,
         state_source=state_source,
+        models_dir=models_dir,
+        available_cash=available_cash,
+        include_features=shadow,
     )
 
     # Spendable-cash check: mid-card, winnings sit in unsettled positions, so
@@ -439,6 +501,7 @@ def process_one(
             "liquidity": result["market"]["liquidity"],
         },
         "model": result["model"],
+        "features": result.get("features"),
         "recommendation": {
             "status": result["status"],
             "error": result["error"],
@@ -448,6 +511,13 @@ def process_one(
         },
         "bankrolls_at_capture": bankrolls,
         "dry_run": dry_run,
+        "mode": "shadow" if shadow else "dry_run" if dry_run else "live",
+        "order_books": {
+            "asks_a": kalshi.asks_a,
+            "asks_b": kalshi.asks_b,
+            "bids_a": kalshi.bids_a,
+            "bids_b": kalshi.bids_b,
+        },
         "late_recovery": late,
         "capture_trigger": trigger,
         "cash_check": cash_short,
@@ -473,9 +543,10 @@ def process_one(
     title, subtitle, msg = build_notification(
         fight, kalshi, result, dry_run=dry_run, late=late, cash_short=cash_short
     )
-    notify(title, subtitle, msg)
+    if not dry_run and not shadow:
+        notify(title, subtitle, msg)
 
-    if not dry_run:
+    if not dry_run or shadow:
         # Transient: record only that we alerted, leaving `key` unset so the
         # next tick retries. Permanent (e.g. debutant with no history): burn
         # `key`, since retrying can never succeed.
@@ -621,7 +692,7 @@ def run(args: argparse.Namespace) -> int:
         print(f"⚠ schedule scrape returned 0 fights for {event['url']}")
         return 1
 
-    if not args.dry_run:
+    if not args.dry_run or getattr(args, "shadow", False):
         # Audit log — persists every successful scrape for replay
         write_audit_log(event["date"], event, schedule)
 
@@ -639,42 +710,16 @@ def run(args: argparse.Namespace) -> int:
         if r.winner
     }
 
-    # Auto-roll card_state to tonight's card. Rolling was a manual runbook
-    # step and got skipped for three straight cards (06-20 → 07-11), leaving
-    # sync a silent no-op and every bet sized on a frozen ledger. On a new
-    # card there are no notifications for the new date yet, so clearing the
-    # exclusion lists cannot double-book anything.
+    # Fill ledger is independent of card dates. Capture fills before accounting.
     if not args.dry_run:
-        event_date_str = pd.Timestamp(event["date"]).strftime("%Y-%m-%d")
-        try:
-            bk = json.loads(BANKROLLS_PATH.read_text())
-            st = bk.get("card_state", {})
-            if st.get("card_date") != event_date_str:
-                bk["card_state"] = {
-                    "card_date": event_date_str,
-                    "baseline_set_at": pd.Timestamp.now(tz="UTC").isoformat(),
-                    "fights_excluded": [],
-                    "fights_provisional": {},
-                }
-                BANKROLLS_PATH.write_text(json.dumps(bk, indent=2))
-                print(f"  [sync] rolled card_state {st.get('card_date')} -> {event_date_str}")
-        except Exception as e:
-            print(f"  [sync] warning: card_state roll failed: {e}", file=sys.stderr)
-
-    # Sync per-account bankrolls from any newly-resolved fights BEFORE we
-    # size new bets. Idempotent — already-applied fights are skipped.
-    if not args.dry_run:
-        try:
-            sync_bankrolls(ufc_results=ufc_results, verbose=verbose)
-        except Exception as e:
-            print(f"  [sync] warning: bankroll sync failed: {e}", file=sys.stderr)
-        # Snapshot actual fills every tick — Kalshi drops portfolio history
-        # within days, and the fills store is the ground truth for what was
-        # really bet (vs what the notification recommended).
         try:
             save_fills(verbose=verbose)
+            ledger_data = sync_bankrolls(ufc_results=ufc_results, verbose=verbose)
+            if ledger_data.get("fill_ledger", {}).get("quarantine"):
+                raise ValueError("unreconciled fills require inspection")
         except Exception as e:
-            print(f"  [fills] warning: fills snapshot failed: {e}", file=sys.stderr)
+            print(f"[sync] refusing recommendations without current fill accounting: {e}", file=sys.stderr)
+            return 1
 
     fights_df = pd.read_parquet(FIGHTS_PATH)
     # Freshness guard: predictions built on a stale fight history produce
@@ -709,7 +754,7 @@ def run(args: argparse.Namespace) -> int:
             # Notify once per day, not once per launchd tick.
             marker = PROCESSED / "stale_data_notified.txt"
             today = str(now.date())
-            if not marker.exists() or marker.read_text().strip() != today:
+            if not args.dry_run and (not marker.exists() or marker.read_text().strip() != today):
                 notify("⛔ bet_runner: STALE DATA — no bets", "", msg, sound="Basso")
                 marker.write_text(today)
             _heartbeat(now, f"tick: BLOCKED stale data ({staleness_days}d)")
@@ -885,7 +930,10 @@ def run(args: argparse.Namespace) -> int:
     summary = []
     # Share one raw-state source across the card.  Its immutable fight-detail
     # cache avoids refetching common opponent histories for every prediction.
-    state_source = UFCStatsStateSource()
+    from ufc_pred.ingest.candidate_state import state_source_for_models
+
+    factory = getattr(args, "state_source_factory", None)
+    state_source = factory() if factory else state_source_for_models(getattr(args, "models_dir", None))
     try:
         for f, is_late, trigger in eligible:
             try:
@@ -904,9 +952,23 @@ def run(args: argparse.Namespace) -> int:
                     trigger=trigger,
                     kalshi_client=api_client,
                     state_source=state_source,
+                    shadow=getattr(args, "shadow", False),
+                    models_dir=getattr(args, "models_dir", None),
                 )
                 summary.append(r)
             except Exception as e:
+                if getattr(args, "shadow", False):
+                    write_record(
+                        event["date"],
+                        make_fight_key(event["date"], f),
+                        {
+                            "mode": "shadow",
+                            "dry_run": True,
+                            "captured_at_utc": now.isoformat(),
+                            "fight": {"fighter_a_ufc": f.fighter_a, "fighter_b_ufc": f.fighter_b},
+                            "recommendation": {"status": "error", "error": str(e), "orders": {}},
+                        },
+                    )
                 print(
                     f"  ⚠ error processing {f.fighter_a} vs {f.fighter_b}: {e}",
                     file=sys.stderr,
@@ -969,6 +1031,10 @@ def main() -> int:
         help="Print per-fight detail (default on for --once/--dry-run).",
     )
     args = ap.parse_args()
+    config = json.loads((CONFIGS / "inference.json").read_text())
+    if config.get("mode") == "shadow":
+        print("Corrected system is frozen in shadow mode. Run python -m ufc_pred.cli.shadow_runner.")
+        return 2
     if not args.once and not args.watchdog:
         args.watchdog = True  # default
     return run(args)

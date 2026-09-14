@@ -16,10 +16,6 @@ import pandas as pd
 from tqdm import tqdm
 
 from ufc_pred.features.skill_v3 import (
-    build_index,
-    encode_fights,
-    fit_nuts,
-    recency_weights_for,
     skill_diff_for_fights,
 )
 from ufc_pred.ingest.kaggle_mdabbert import HISTORY_PARQUET
@@ -38,6 +34,7 @@ def build(
     num_samples: int = 500,
     num_chains: int = 2,
     min_train_fights: int = 50,
+    history_path: Path = HISTORY_PARQUET,
 ) -> dict:
     """Build skill_features_v3.parquet via monthly walk-forward.
 
@@ -45,12 +42,14 @@ def build(
     features (the model would just sample the prior). CatBoost handles NaN
     natively.
     """
-    fights = pd.read_parquet(HISTORY_PARQUET)
+    fights = pd.read_parquet(history_path)
     fights = fights[fights["Winner"].isin(["Red", "Blue"])].copy()
     fights["date"] = pd.to_datetime(fights["date"])
     fights = fights.sort_values("date").reset_index(drop=True)
 
-    index = build_index(fights)
+    from ufc_pred.ingest.identity import canonicalize_frame
+
+    fights = canonicalize_frame(fights)
 
     months = sorted({month_floor(d) for d in fights["date"]})
     out_frames: list[pd.DataFrame] = []
@@ -80,19 +79,10 @@ def build(
             fit_log.append({"month": str(m_start.date()), "n_prior": n_prior, "fit": False})
             continue
 
-        a, b, y = encode_fights(prior, index)
-        w = recency_weights_for(prior["date"], reference_date=m_start - pd.Timedelta(days=1))
-        samples = fit_nuts(
-            a,
-            b,
-            y,
-            index,
-            weights=w,
-            num_warmup=num_warmup,
-            num_samples=num_samples,
-            num_chains=num_chains,
-            progress_bar=False,
-            seed=int(m_start.year) * 100 + int(m_start.month),
+        from ufc_pred.inference.skill_for_upcoming import fit_or_load_month_posterior
+
+        samples, index = fit_or_load_month_posterior(
+            fights, m_start, num_warmup=num_warmup, num_samples=num_samples, num_chains=num_chains
         )
         feats = skill_diff_for_fights(target, samples, index)
         out_frames.append(feats)

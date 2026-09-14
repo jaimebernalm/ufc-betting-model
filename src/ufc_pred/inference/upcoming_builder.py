@@ -22,6 +22,7 @@ from difflib import get_close_matches
 import numpy as np
 import pandas as pd
 
+from ufc_pred.ingest.identity import canonical, normalise
 from ufc_pred.ingest.rankings_attach import attach_ranks, load_rankings
 
 _DIFF_PAIRS = [
@@ -62,16 +63,39 @@ _ALIASES = {
     # and prices the bet on 12 fights of the wrong record. Correct man is
     # "Ty Miller", WW, debut 2026-01-24.
     "Ty Cole Miller": "Ty Miller",
+    # Kyrgyz patronymic "Uulu" ("son of") appended, plus an i/y transliteration
+    # swap on the surname — difflib lands under the 0.85 cutoff even though its
+    # own top suggestion is the right man. LW, 6 fights in history.
+    "Myktybek Orolbay Uulu": "Myktybek Orolbai",
+    # 2026-08-29. Kalshi writes Chinese names first-name-last; UFCStats (and so
+    # history) keeps the Chinese order. Reversed tokens score far below the
+    # 0.85 cutoff, so both silently failed to resolve on the night — including
+    # the main event and co-main.
+    "Yadong Song": "Song Yadong",  # BW, 16 fights in history
+    "Xiaonan Yan": "Yan Xiaonan",  # W-SW, 13 fights in history
+    # 2026-08-29. Kalshi splits the single name and reverses the halves:
+    # "Aoriqileng" -> "Qileng Aori". No shared token with the canonical name.
+    "Qileng Aori": "Aoriqileng",  # BW, 8 fights in history
+    # 2026-08-29. DANGEROUS, do not remove: "Su Mudaerji" is an EXACT hit in
+    # fights.parquet, but only on the 2018-2021 rows — the upstream Kaggle feed
+    # renamed him to "Sumudaerji" in 2022 and his last 6 fights sit under that
+    # spelling. Without this alias resolution "succeeds" on a stale 4-fight
+    # record. _clean() in kaggle_mdabbert now folds the two, so this alias is
+    # the belt to that braces.
+    "Su Mudaerji": "Sumudaerji",  # FLW, 10 fights in history once merged
 }
 
 
-def resolve_fighter_name(name: str, fights: pd.DataFrame) -> str:
+def resolve_fighter_name(name: str, fights: pd.DataFrame, weight_class: str | None = None) -> str:
     """Map a Polymarket-style name to the canonical UFCstats name."""
-    name = _ALIASES.get(name, name)
+    name = canonical(_ALIASES.get(name, name), weight_class)
     all_names = pd.unique(pd.concat([fights["R_fighter"], fights["B_fighter"]]).dropna())
     if name in all_names:
         return name
-    matches = get_close_matches(name, list(all_names), n=1, cutoff=0.85)
+    exact = [n for n in all_names if normalise(n) == normalise(name)]
+    if len(exact) == 1:
+        return exact[0]
+    matches = []  # Fuzzy candidates are diagnostics, never verified identities.
     if not matches:
         raise ValueError(
             f"No fighter match for {name!r}. Closest: "
@@ -151,8 +175,12 @@ def build_upcoming_row(
     `fighter_a` becomes the Red corner; `fighter_b` the Blue corner. Predictions
     return p(Red wins) = p(fighter_a wins).
     """
-    fighter_a = resolve_fighter_name(fighter_a, fights)
-    fighter_b = resolve_fighter_name(fighter_b, fights)
+    from ufc_pred.ingest.identity import verified_envelope
+
+    fights = verified_envelope(fights)
+    fights = fights[pd.to_datetime(fights["date"]) < pd.Timestamp(fight_date)]
+    fighter_a = resolve_fighter_name(fighter_a, fights, weight_class)
+    fighter_b = resolve_fighter_name(fighter_b, fights, weight_class)
 
     # Only fights strictly before the target date may inform the features —
     # _last_fighter_stats folds the last fight's RESULT into wins/streaks, so
@@ -201,6 +229,11 @@ def build_upcoming_row(
     df = pd.DataFrame([row])
     df["date"] = pd.to_datetime(df["date"])
     rankings = rankings if rankings is not None else load_rankings()
-    df = attach_ranks(df, rankings=rankings)
+    if state_source is not None:
+        from ufc_pred.ingest.strict_history import apply_state_features
+
+        df = apply_state_features(df, state_source, rankings)
+    else:
+        df = attach_ranks(df, rankings=rankings)
     df["date"] = pd.to_datetime(df["date"])
     return df

@@ -24,20 +24,17 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from pathlib import Path
 
 import joblib
 import numpy as np
 import pandas as pd
 from catboost import CatBoostClassifier, Pool
 
-ROOT = Path(__file__).resolve().parents[1]
-
 from ufc_pred.features.skill_v3_pipeline import OUTPUT as SKILL_V3_PARQUET
 from ufc_pred.features.static_v1 import prepare
 from ufc_pred.ingest.kaggle_mdabbert import HISTORY_PARQUET
 from ufc_pred.models.wrappers import CorruptedSkillModel
-from ufc_pred.paths import METRICS, MODELS
+from ufc_pred.paths import METRICS, MODELS, ROOT
 from ufc_pred.utils.time_splits import recency_weights
 
 START = 300.0
@@ -76,7 +73,7 @@ def train_rolling(cutoff):
     n = len(X) // 2
     if len(X) == 2 * n and "skill_diff_mean" in X.columns:
         X = X.copy()
-        X.loc[X.index[n:], "skill_diff_mean"] = -X.loc[X.index[n:], "skill_diff_mean"]
+        pass  # prepare already negates signed means on swapped rows
     w = recency_weights(d, reference_date=cutoff - pd.Timedelta(days=1))
     pool = Pool(X, y, cat_features=cat, weight=w)
     m = CatBoostClassifier(

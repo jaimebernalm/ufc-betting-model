@@ -23,19 +23,17 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 
 import joblib
 import numpy as np
 import pandas as pd
-
-REPO = Path(__file__).resolve().parent.parent
 
 from ufc_pred.backtest.strategy_grid import ModelBundle, predict
 from ufc_pred.backtest.universe import add_prior_fight_counts
 from ufc_pred.features.skill_v3_pipeline import OUTPUT as SKILL_V3_PARQUET
 from ufc_pred.ingest.kaggle_mdabbert import HISTORY_PARQUET
 from ufc_pred.paths import METRICS, MODELS
+from ufc_pred.paths import ROOT as REPO
 
 SNAPSHOT = REPO / "data/raw/kalshi/snapshots/historical_T-90min_perfight_combined.parquet"
 CUTOFF_TAG = "2025_11_30"
@@ -44,20 +42,11 @@ FEE_COEFF = 0.07
 
 
 def swap_corners(df: pd.DataFrame) -> pd.DataFrame:
-    ren = {}
-    for c in df.columns:
-        if c.startswith("R_"):
-            ren[c] = "B_" + c[2:]
-        elif c.startswith("B_"):
-            ren[c] = "R_" + c[2:]
-    out = df.rename(columns=ren)
+    from ufc_pred.features.static_v1 import _swap_red_blue
+
+    out = _swap_red_blue(df)
     if "Winner" in out:
         out["Winner"] = out["Winner"].map({"Red": "Blue", "Blue": "Red"})
-    for c in out.columns:
-        if c.endswith("_dif"):
-            out[c] = -out[c]
-    if "skill_diff_mean" in out:
-        out["skill_diff_mean"] = -out["skill_diff_mean"]
     return out
 
 
@@ -165,7 +154,7 @@ def evaluate(df: pd.DataFrame, p_a: np.ndarray, thr: float) -> pd.DataFrame:
     edge = np.where(take_a, edge_a, edge_b)
     won = np.where(take_a, df["won_a"].to_numpy(), ~df["won_a"].to_numpy())
     fee = FEE_COEFF * price * (1 - price)
-    pnl = np.where(won, (1 - price - fee) / price, -1.0)
+    pnl = np.where(won, (1 - price - fee) / (price + fee), -1.0)
     out = df.copy()
     out["side_a"], out["price"], out["edge"], out["won"], out["pnl"] = take_a, price, edge, won, pnl
     out["p_bet"] = np.where(take_a, p_a, 1 - p_a)
