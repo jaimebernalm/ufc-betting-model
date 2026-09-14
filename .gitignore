@@ -81,3 +81,7 @@ htmlcov/
 /TENNIS_PORTED_FINDINGS.md
 /TENNIS_PORTED_IDEAS.md
 /PUBLIC_RELEASE_PLAN.md
+
+# Runtime lock and separately versioned raw export
+/configs/bankrolls.lock
+/data/raw/ufcstats_export/

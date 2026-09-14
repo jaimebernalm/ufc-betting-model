@@ -37,9 +37,8 @@ from ufc_pred.backtest.universe import add_prior_fight_counts
 from ufc_pred.features.skill_v3_pipeline import OUTPUT as SKILL_PATH
 from ufc_pred.features.static_v1 import _swap_red_blue
 from ufc_pred.ingest.kaggle_mdabbert import HISTORY_PARQUET
-from ufc_pred.paths import METRICS
+from ufc_pred.paths import METRICS, ROOT
 
-ROOT = Path(__file__).resolve().parents[1]
 POLY_PATH = ROOT / "data/interim/polymarket_matched_to_kaggle_v2.parquet"
 KALSHI_PATH = ROOT / "data/raw/kalshi/snapshots/historical_T-90min_perfight_combined.parquet"
 FEE_CACHE = METRICS / "polymarket_fee_schedule.json"

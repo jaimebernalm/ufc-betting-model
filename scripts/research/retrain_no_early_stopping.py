@@ -18,7 +18,7 @@ from catboost import CatBoostClassifier, Pool
 
 from ufc_pred.backtest.bet_eval import evaluate_bets
 from ufc_pred.backtest.metrics import evaluate, market_no_vig_prob_red
-from ufc_pred.features.joins import flip_signed_columns, join_skill_stacked
+from ufc_pred.features.joins import join_skill_stacked
 from ufc_pred.features.skill_v3_1_pipeline import OUTPUT as SKILL_V3_1_PARQUET
 from ufc_pred.features.skill_v3_pipeline import OUTPUT as SKILL_V3_PARQUET
 from ufc_pred.features.static_v1 import prepare
@@ -33,7 +33,7 @@ def _join_skill(fights):
 
 
 def _augmented_skill_columns(X):
-    return flip_signed_columns(X, V3_3_FLIP_COLS)
+    return X  # prepare already applies symmetry once
 
 
 def build_model():

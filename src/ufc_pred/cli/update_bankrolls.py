@@ -59,6 +59,14 @@ def main() -> int:
     )
     parser.add_argument("--dry-run", action="store_true", help="Show updates without writing bankrolls.json")
     args = parser.parse_args()
+    if not args.dry_run:
+        from ufc_pred.ops.bankroll import sync
+        from ufc_pred.ops.fills import save_fills
+
+        save_fills()
+        sync(verbose=True)
+        return 0
+    # Legacy plans remain readable in dry-run, never applied to real balances.
 
     bet_path = BETS_DIR / f"{args.card_date}_bets.json"
     if not bet_path.exists():

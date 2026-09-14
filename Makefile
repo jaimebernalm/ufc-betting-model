@@ -42,3 +42,20 @@ backtest:  ## Evaluate the strategy grid on the validation window
 
 preview:  ## Read-only preview of the next Kalshi card
 	ufc-preview
+
+# Corrected, isolated bundle. Existing production model files are preserved.
+.PHONY: corrected-history corrected-skill corrected-train corrected-evaluate shadow-check
+corrected-history:
+	PYTHONPATH=src .conda/bin/python scripts/research/validate_result_envelope.py
+
+corrected-skill: corrected-history
+	PYTHONPATH=src .conda/bin/python -c "from pathlib import Path; from ufc_pred.features.skill_v3_pipeline import build; p=Path('artifacts/corrected_2026_09_14'); print(build(output_path=p/'skill_features.parquet', history_path=p/'verified_history.parquet'))"
+
+corrected-train:
+	PYTHONPATH=src .conda/bin/python scripts/research/rebuild_corrected_system.py
+
+corrected-evaluate:
+	PYTHONPATH=src .conda/bin/python scripts/research/evaluate_corrected_system.py
+
+shadow-check:
+	PYTHONPATH=src .conda/bin/python -m ufc_pred.cli.shadow_runner --check

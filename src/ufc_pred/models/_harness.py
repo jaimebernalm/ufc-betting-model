@@ -25,7 +25,6 @@ from catboost import CatBoostClassifier, Pool
 
 from ufc_pred.backtest.bet_eval import evaluate_bets
 from ufc_pred.backtest.metrics import evaluate, market_no_vig_prob_red
-from ufc_pred.features.joins import flip_signed_columns
 from ufc_pred.features.static_v1 import prepare
 from ufc_pred.ingest.kaggle_mdabbert import HISTORY_PARQUET
 from ufc_pred.models._spec import BETTING_SCENARIOS, ModelSpec
@@ -53,7 +52,7 @@ def build_matrices(spec: ModelSpec) -> dict[str, Any]:
     splits = split(fights)
 
     X_train, y_train, d_train, cat_features = prepare(splits.train, augment_symmetry=True, one_hot=False)
-    X_train = flip_signed_columns(X_train, spec.recipe.flip_columns)
+    # prepare owns all symmetry transformations, including signed skill means.
 
     X_val, y_val, _, _ = prepare(splits.val, augment_symmetry=False, one_hot=False)
     X_val = X_val.reindex(columns=X_train.columns, fill_value=None)

@@ -50,9 +50,8 @@ def _augment_skill_sign(X: pd.DataFrame) -> pd.DataFrame:
     if len(X) != 2 * n:
         return X
     X = X.copy()
-    second = X.index[n:]
     if "skill_diff_mean" in X.columns:
-        X.loc[second, "skill_diff_mean"] = -X.loc[second, "skill_diff_mean"]
+        pass  # prepare already negates signed means on swapped rows
     return X
 
 

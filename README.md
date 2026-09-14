@@ -6,7 +6,7 @@
 
 A CatBoost + Bayesian-skill model that prices UFC fights against prediction
 markets (Kalshi, Polymarket), sizes bets with fee-correct fractional Kelly, and
-runs live as a notify-only watchdog.
+supports a recommendation watchdog. The current candidate runs in shadow mode.
 
 On a held-out test set of **1,141 fights** it returned **+10.9% ROI**
 (95% CI [+2.5%, +19.4%]) at flat stakes against real Kalshi fees — while being
@@ -15,6 +15,15 @@ On a held-out test set of **1,141 fights** it returned **+10.9% ROI**
 That gap is the whole point, and the honest version of this README is that the
 edge later **decayed to −30%** on Kalshi after May 2026. Both halves are
 documented below.
+
+**September 2026 audit:** the headline results below describe earlier
+experiments. The audit found feature leakage, identity/ranking mismatches,
+symmetry errors, and execution/accounting differences. The corrected candidate
+improves predictive scores relative to the first rebuild, but does not improve
+returns in every window; the operational Kalshi replay remains negative. See the
+[audit](docs/AUDITORIA_SIMULACION_VS_LIVE_2026_09_14.md),
+[comparisons](docs/ABLACIONES_Y_CAUSAS_DEL_DETERIORO_2026_09_14.md), and
+[shadow v2 validation](docs/ACTIVACION_SOMBRA_CANDIDATA_V2_2026_09_14.md).
 
 ---
 
@@ -137,19 +146,28 @@ scripts/
 ├── research/     one-shot analyses, kept as a record
 └── tools/        data pipeline + maintenance
 docs/             methodology, results, architecture, deployment
-tests/            80 tests (4 need the dataset)
+tests/            103 tests (4 require the optional local dataset)
 ```
 
 ## Deployment
 
-Runs live against Kalshi as a launchd watchdog, ticking every 60 seconds and
-capturing each fight when the previous one settles. Three virtual accounts run
-in parallel at different Kelly fractions.
+The active candidate uses an isolated **shadow-only** launchd watchdog every
+60 seconds, preserving the existing fight-capture timing. It records model
+inputs, probabilities, source hashes, books and paper balances without sending
+bet alerts or placing orders. Kelly fractions, sharpening and the training
+cutoff remain frozen. Review requires both 12 completed cards and 150 resolved
+eligible fights; future profitability has not been established.
 
-**It is notify-only.** `KalshiClient` exposes balance, market, and orderbook
-reads — there is no order-placement method anywhere in the package. The system
-computes a recommendation and pushes it to a phone; a human places every bet.
-That is a deliberate constraint, not an unfinished feature.
+The configured bundle is `artifacts/shadow_candidate_2026_09_14_v2/`. Model
+binaries, datasets, archived web responses, runtime manifests and personal
+ledgers are intentionally excluded from Git. A fresh clone can run unit tests,
+but running shadow inference or reproducing the historical comparisons also
+requires the local input/model bundle documented in the
+[activation report](docs/ACTIVACION_SOMBRA_CANDIDATA_V2_2026_09_14.md).
+Use `make shadow-check` to verify an installed frozen bundle before capture.
+
+The general recommendation CLI remains available for manual workflows.
+`KalshiClient` has no order-placement method; any real-money execution is manual.
 
 Details: [docs/deployment.md](docs/deployment.md).
 

@@ -49,11 +49,10 @@ class SkillIndex:
 
 
 def build_index(fights: pd.DataFrame) -> SkillIndex:
-    """Build a global fighter / weight-class index from ALL fights.
+    """Build the index from strictly prior fights only.
 
-    Using the full history (train+val+test) for the *index only* is not a
-    leak — the index just numbers fighters; no outcomes are read. Posteriors
-    are still fit on prior-only slices per call.
+    Modal weight class is a prior parameter, so future divisions must never
+    enter this function. Fighters unseen before the month receive NaN skill.
     """
     names = pd.unique(pd.concat([fights["R_fighter"], fights["B_fighter"]]))
     names = sorted(str(n) for n in names)
@@ -166,7 +165,14 @@ def fit_nuts(
         weights=jnp.asarray(weights) if weights is not None else None,
     )
     samples = {k: np.asarray(v) for k, v in mcmc.get_samples().items()}
-    samples["_extra_fields"] = mcmc.get_extra_fields() if False else None  # placeholder
+    from numpyro.diagnostics import summary
+
+    diagnostics = summary(mcmc.get_samples(group_by_chain=True), group_by_chain=True)
+    samples["_diagnostics"] = {
+        "max_rhat": float(max(np.nanmax(v["r_hat"]) for v in diagnostics.values())),
+        "min_ess": float(min(np.nanmin(v["n_eff"]) for v in diagnostics.values())),
+        "divergences": int(np.asarray(mcmc.get_extra_fields()["diverging"]).sum()),
+    }
     return samples
 
 
@@ -203,11 +209,5 @@ def skill_diff_for_fights(
 
 
 def rhat_summary(samples: dict[str, np.ndarray]) -> dict[str, float]:
-    """Quick convergence summary for the skill parameters. Returns max R-hat
-    across `skill` and the hyperparameters. NumPyro's get_samples flattens
-    chains; for a real R-hat we'd need the un-flattened version, so this is
-    a placeholder that reports posterior std stability as a proxy.
-    """
-    # Real R-hat needs chain structure preserved via mcmc.get_samples(group_by_chain=True).
-    # Kept as a TODO; see fit_nuts. For smoke-test we rely on mcmc.print_summary().
-    return {"placeholder": float("nan")}
+    """Actual chain-aware convergence diagnostics captured during fitting."""
+    return samples.get("_diagnostics", {"unavailable": float("nan")})

@@ -79,7 +79,7 @@ def train_catboost(train_df, recency_ref):
     n = len(X_train) // 2
     if len(X_train) == 2 * n and "skill_diff_mean" in X_train.columns:
         X_train = X_train.copy()
-        X_train.loc[X_train.index[n:], "skill_diff_mean"] = -X_train.loc[X_train.index[n:], "skill_diff_mean"]
+        pass  # prepare already negates signed means on swapped rows
 
     w = recency_weights(d_train, reference_date=recency_ref)
     pool = Pool(X_train, y_train, cat_features=cat_features, weight=w)

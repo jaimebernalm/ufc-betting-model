@@ -27,19 +27,17 @@ from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
 
 import joblib
 import numpy as np
 import pandas as pd
-
-ROOT = Path(__file__).resolve().parents[1]
 
 from ufc_pred.backtest.bet_eval import _effective_decimal
 from ufc_pred.backtest.strategy_grid import train_corrupted, train_real
 from ufc_pred.features.skill_v3_pipeline import OUTPUT as SKILL_V3_PARQUET
 from ufc_pred.features.static_v1 import _swap_red_blue, prepare
 from ufc_pred.ingest.kaggle_mdabbert import HISTORY_PARQUET
+from ufc_pred.paths import ROOT
 
 SHARPEN_T = json.loads((ROOT / "configs/inference.json").read_text())["sharpen_T"]
 START = 300.0

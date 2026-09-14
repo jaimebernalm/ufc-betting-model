@@ -8,11 +8,10 @@ Kelly, edge-cap sims, sweep) lives in the script and is documented in §0.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import nbformat as nbf
 
-ROOT = Path(__file__).resolve().parents[1]
+from ufc_pred.paths import ROOT
+
 OUT = ROOT / "notebooks" / "11_cap_large_edges.ipynb"
 
 nb = nbf.v4.new_notebook()

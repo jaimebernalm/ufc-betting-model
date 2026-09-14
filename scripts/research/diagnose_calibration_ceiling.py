@@ -23,7 +23,7 @@ from catboost import CatBoostClassifier
 from ufc_pred.backtest.bet_eval import evaluate_bets
 from ufc_pred.backtest.metrics import evaluate
 from ufc_pred.calibration.methods import build as build_calibrator
-from ufc_pred.features.joins import flip_signed_columns, join_skill_stacked
+from ufc_pred.features.joins import join_skill_stacked
 from ufc_pred.features.static_v1 import prepare
 from ufc_pred.ingest.kaggle_mdabbert import HISTORY_PARQUET
 from ufc_pred.models._spec import BASE_CATBOOST_PARAMS
@@ -36,7 +36,7 @@ def _join_skill(fights):
 
 
 def _augmented_skill_columns(X):
-    return flip_signed_columns(X, V3_3_FLIP_COLS)
+    return X  # prepare already applies symmetry once
 
 
 def build_model():

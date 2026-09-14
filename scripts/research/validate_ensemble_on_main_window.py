@@ -20,12 +20,9 @@ to the seed median for every account.
 from __future__ import annotations
 
 import time
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
-
-ROOT = Path(__file__).resolve().parents[1]
 
 from ufc_pred.backtest.strategy_grid import (
     ACCOUNT_SPECS,
@@ -36,6 +33,7 @@ from ufc_pred.backtest.strategy_grid import (
 )
 from ufc_pred.features.skill_v3_pipeline import OUTPUT as SKILL_V3_PARQUET
 from ufc_pred.ingest.kaggle_mdabbert import HISTORY_PARQUET
+from ufc_pred.paths import ROOT
 
 CUTOFF = pd.Timestamp("2025-01-01")  # analog of deployment cutoff (6mo stale)
 EVAL_START = pd.Timestamp("2025-07-01")

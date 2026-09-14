@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from ufc_pred.backtest.strategy_grid import ModelBundle, predict
+from ufc_pred.paths import CONFIGS, ROOT
 from ufc_pred.paths import MODELS as MODELS_DIR
 
 DEFAULT_CUTOFF_TAG = "2025_11_30"
@@ -34,12 +36,16 @@ def predict_ensemble(
     *,
     cutoff_tag: str = DEFAULT_CUTOFF_TAG,
     n_seeds: int = DEFAULT_N_SEEDS,
+    models_dir: Path | None = None,
 ) -> EnsemblePrediction:
     """Return averaged p(Red wins) across both ensembles."""
+    if models_dir is None:
+        config = json.loads((CONFIGS / "inference.json").read_text())
+        models_dir = ROOT / config["model_bundle"] if config.get("model_bundle") else MODELS_DIR
     real, corr = [], []
     for s in range(n_seeds):
-        br = _load_bundle(MODELS_DIR / f"v3_real_{cutoff_tag}_seed{s}.joblib")
-        bc = _load_bundle(MODELS_DIR / f"v3_corrupted_{cutoff_tag}_seed{s}.joblib")
+        br = _load_bundle(models_dir / f"v3_real_{cutoff_tag}_seed{s}.joblib")
+        bc = _load_bundle(models_dir / f"v3_corrupted_{cutoff_tag}_seed{s}.joblib")
         real.append(float(predict(br, upcoming_row.copy())[0]))
         corr.append(float(predict(bc, upcoming_row.copy())[0]))
     real = np.array(real)
@@ -58,6 +64,7 @@ def predict_ensemble_symmetric(
     *,
     cutoff_tag: str = DEFAULT_CUTOFF_TAG,
     n_seeds: int = DEFAULT_N_SEEDS,
+    models_dir: Path | None = None,
 ) -> EnsemblePrediction:
     """Orientation-invariant prediction: average each seed over both corner
     orderings, p = (p_fwd + (1 - p_rev)) / 2.
@@ -69,10 +76,13 @@ def predict_ensemble_symmetric(
     averaging removes that dependence. Returns p(fighter_a wins).
     """
     both = pd.concat([row_fwd, row_rev], ignore_index=True)
+    if models_dir is None:
+        config = json.loads((CONFIGS / "inference.json").read_text())
+        models_dir = ROOT / config["model_bundle"] if config.get("model_bundle") else MODELS_DIR
     real, corr = [], []
     for s in range(n_seeds):
-        br = _load_bundle(MODELS_DIR / f"v3_real_{cutoff_tag}_seed{s}.joblib")
-        bc = _load_bundle(MODELS_DIR / f"v3_corrupted_{cutoff_tag}_seed{s}.joblib")
+        br = _load_bundle(models_dir / f"v3_real_{cutoff_tag}_seed{s}.joblib")
+        bc = _load_bundle(models_dir / f"v3_corrupted_{cutoff_tag}_seed{s}.joblib")
         pr = predict(br, both.copy())
         pc = predict(bc, both.copy())
         real.append(0.5 * (float(pr[0]) + 1.0 - float(pr[1])))

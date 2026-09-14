@@ -28,8 +28,9 @@ from ufc_pred.inference.sizing import (
 )
 from ufc_pred.inference.skill_for_upcoming import attach_skill_for_upcoming
 from ufc_pred.inference.upcoming_builder import build_upcoming_row, resolve_fighter_name
+from ufc_pred.ingest.candidate_state import state_source_for_models
 from ufc_pred.ingest.ufcstats_state import UFCStatsStateSource
-from ufc_pred.paths import CONFIGS
+from ufc_pred.paths import CONFIGS, ROOT
 
 
 def _load_sharpen_t() -> float:
@@ -82,6 +83,9 @@ def predict_one_fight(
     accounts: list[AccountConfig] | None = None,
     state_source: UFCStatsStateSource | None = None,
     fee_coeff: float = KALSHI_FEE_COEFF,
+    available_cash: float | None = None,
+    models_dir=None,
+    include_features: bool = False,
 ) -> dict:
     """Run the full predict-and-size pipeline on a single fight.
 
@@ -109,6 +113,9 @@ def predict_one_fight(
         "summary_line": str,   # one-line human summary for notification subtitle
       }
     """
+    if models_dir is None:
+        config = json.loads((CONFIGS / "inference.json").read_text())
+        models_dir = ROOT / config["model_bundle"]
     if not fight.asks_a or not fight.asks_b:
         return {
             "status": "skip",
@@ -124,6 +131,11 @@ def predict_one_fight(
     # The UFC.com scraper sometimes returns non-standard classes (e.g.
     # "Catchweight") that don't appear in fights.parquet. Validate the hint;
     # fall back to the modal lookup if unknown.
+    from ufc_pred.ingest.identity import verified_envelope
+
+    # The canonical history and class inference also obey the target cutoff.
+    target_date = fight.fight_date.tz_localize(None) if fight.fight_date.tzinfo else fight.fight_date
+    fights = verified_envelope(fights[pd.to_datetime(fights["date"]) < target_date])
     known_classes = set(fights["weight_class"].unique())
     if weight_class_hint and weight_class_hint in known_classes:
         weight_class = weight_class_hint
@@ -134,7 +146,7 @@ def predict_one_fight(
     fight_date = fight.fight_date.tz_localize(None) if fight.fight_date.tzinfo else fight.fight_date
     owned_state_source = state_source is None
     if state_source is None:
-        state_source = UFCStatsStateSource()
+        state_source = state_source_for_models(models_dir)
     try:
         upcoming = build_upcoming_row(
             fighter_a=fight.fighter_a,
@@ -179,10 +191,10 @@ def predict_one_fight(
 
     upcoming = attach_skill_for_upcoming(upcoming, fights)
     upcoming_rev = attach_skill_for_upcoming(upcoming_rev, fights)
-    pred = predict_ensemble_symmetric(upcoming, upcoming_rev)
+    pred = predict_ensemble_symmetric(upcoming, upcoming_rev, models_dir=models_dir)
     # Per-orientation outputs, kept for monitoring how asymmetric the deployed
     # (non-sign-flipped-augmentation) models still are on this fight.
-    pred_fwd = predict_ensemble(upcoming)
+    pred_fwd = predict_ensemble(upcoming, models_dir=models_dir)
 
     sharpen_t = _load_sharpen_t()
     p_real = _sharpen(pred.real_mean, sharpen_t)
@@ -196,6 +208,7 @@ def predict_one_fight(
         fight.asks_a,
         fight.asks_b,
         fee_coeff=fee_coeff,
+        available_cash=available_cash,
     )
 
     orders = _aggregate_orders(recs, fight)
@@ -215,13 +228,22 @@ def predict_one_fight(
             "corrupted_per_seed_std": float(pred.corrupted_per_seed.std()),
             "n_seeds": int(len(pred.real_per_seed)),
             "symmetrized": True,
-            "feature_source": "ufcstats_raw_pre_fight",
+            "feature_source": type(state_source).__name__,
+            "source_observations": getattr(state_source, "observations", {}),
             "title_bout": bool(title_bout),
             "no_of_rounds": int(no_of_rounds),
             "fee_coeff": float(fee_coeff),
             "orientation_gap_real": float(2 * (pred_fwd.real_mean - pred.real_mean)),
             "orientation_gap_corrupted": float(2 * (pred_fwd.corrupted_mean - pred.corrupted_mean)),
         },
+        "features": (
+            {
+                "forward": upcoming.astype(object).where(upcoming.notna(), None).to_dict("records"),
+                "reverse": upcoming_rev.astype(object).where(upcoming_rev.notna(), None).to_dict("records"),
+            }
+            if include_features
+            else None
+        ),
         "recommendations": [asdict(r) for r in recs],
         "orders": orders,
         "summary_line": _summary_line(fight, pred, orders),

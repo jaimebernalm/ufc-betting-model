@@ -9,7 +9,6 @@ all matched fights; it does not treat pre-cutoff model predictions as OOS.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -20,8 +19,8 @@ try:
 except ImportError:  # Support direct execution from the scripts directory.
     from strict_multivenue_postcutoff import _effective_decimal
 from ufc_pred.inference.sizing import _full_kelly
+from ufc_pred.paths import ROOT
 
-ROOT = Path(__file__).resolve().parents[1]
 DETAILS = ROOT / "artifacts/metrics/strict_multivenue_postcutoff_fights.parquet"
 MATCHED = ROOT / "data/interim/polymarket_matched_to_kaggle_v2.parquet"
 POLY_RAW = ROOT / "data/raw/polymarket/historical_2024-04-13_to_2026-05-24.parquet"

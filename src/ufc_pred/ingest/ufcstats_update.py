@@ -59,6 +59,7 @@ def update_master(
     *,
     since: datetime | None = None,
     dry_run: bool = False,
+    completed_before: datetime | None = None,
 ) -> dict:
     """Scrape any events newer than the cutoff and append to ufc-master.csv.
 
@@ -73,7 +74,11 @@ def update_master(
 
     with UFCStatsClient() as client:
         events = list_completed_events(client)
-        events = [e for e in events if e.date > since and e.date <= today]
+        events = [
+            e
+            for e in events
+            if e.date > since and e.date <= today and (completed_before is None or e.date < completed_before)
+        ]
         events.sort(key=lambda e: e.date)
 
         summary = {

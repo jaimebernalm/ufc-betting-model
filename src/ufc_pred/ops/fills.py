@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 
 from dotenv import load_dotenv
 
@@ -48,36 +47,36 @@ def fetch_fills(client: KalshiClient | None = None) -> list[dict]:
         cursor = r.get("cursor")
         if not cursor or not fills:
             break
+    else:
+        raise RuntimeError("Fill pagination exceeded MAX_PAGES; refusing an incomplete snapshot")
     return out
 
 
 def save_fills(client: KalshiClient | None = None, *, verbose: bool = False) -> int:
     """Merge fresh fills into the store. Returns the number of NEW fills."""
-    store: dict[str, dict] = {}
-    if FILLS_PATH.exists():
-        try:
-            store = json.loads(FILLS_PATH.read_text())
-        except json.JSONDecodeError:
-            # Never clobber a corrupt store silently — move it aside.
-            backup = FILLS_PATH.with_suffix(".json.corrupt")
-            FILLS_PATH.rename(backup)
-            print(f"  [fills] store unreadable, moved to {backup.name}", file=sys.stderr)
+    import fcntl
 
     fresh = fetch_fills(client)
-    new = 0
-    for f in fresh:
-        fid = f.get("fill_id") or f.get("id") or f.get("trade_id")
-        if fid is None:
-            # No stable id — key on (ticker, created_time, count, side).
-            fid = f"{f.get('ticker')}|{f.get('created_time')}|{f.get('count')}|{f.get('side')}"
-        if fid not in store:
-            store[fid] = f
-            new += 1
-    if new:
-        FILLS_PATH.write_text(json.dumps(store, indent=1))
-    if verbose:
-        print(f"  [fills] {len(fresh)} visible, {new} new, {len(store)} stored")
-    return new
+    FILLS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with FILLS_PATH.with_suffix(".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        # A corrupt archive must remain visible and must block accounting.
+        store = json.loads(FILLS_PATH.read_text()) if FILLS_PATH.exists() else {}
+        new = 0
+        for fill in fresh:
+            fid = fill.get("fill_id") or fill.get("id") or fill.get("trade_id")
+            if fid is None:
+                raise ValueError("Fill without stable venue ID; cannot guarantee deduplication")
+            if fid not in store:
+                store[fid] = fill
+                new += 1
+        if new:
+            temp = FILLS_PATH.with_suffix(".tmp")
+            temp.write_text(json.dumps(store, indent=1))
+            temp.replace(FILLS_PATH)
+        if verbose:
+            print(f"[fills] {len(fresh)} visible, {new} new, {len(store)} archived")
+        return new
 
 
 def main():

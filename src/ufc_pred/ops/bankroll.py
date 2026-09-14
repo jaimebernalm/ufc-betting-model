@@ -1,4 +1,7 @@
-"""Sync per-account bankrolls based on resolved Kalshi fights.
+"""Fill-based reconciliation. Legacy helper functions remain for audit compatibility.
+
+Historical design (superseded by fill_ledger below):
+Sync per-account bankrolls based on resolved Kalshi fights.
 
 Each bet_notifications/<key>.json records per-account stakes + shares for one
 fight. This script applies per-account PnL as soon as a fight is RESOLVED —
@@ -154,155 +157,78 @@ def _per_account_pnl(per_account: list[dict], yes_won: bool, price: float) -> di
 
 
 def sync(*, client: KalshiClient | None = None, ufc_results=None, verbose: bool = False) -> dict:
-    """Apply all newly-resolved fights to bankrolls. Returns the updated dict.
+    """Reconcile actual fills across all cards; recommendations only allocate fills."""
+    import fcntl
 
-    Resolution sources, fastest first:
-      1. UFC.com result badges (`ufc_results`, list of FightResult) — winner
-         known ~1-2 min after the fight; booked as PROVISIONAL PnL.
-      2. Kalshi market resolution (settled -> final; legacy pin -> provisional).
-    Provisional entries are trued-up at official Kalshi settlement.
+    from ufc_pred.ops.fill_ledger import migration_anchor, reconcile
+    from ufc_pred.ops.fills import FILLS_PATH
 
-    Idempotent: skips fights already in `card_state.fights_excluded`.
-    """
-    data = _load()
-    state = data.get("card_state", {})
-    card_date = state.get("card_date")
-    excluded: set[str] = set(state.get("fights_excluded", []))
-    provisional: dict = dict(state.get("fights_provisional", {}))
-
-    if not card_date:
-        return data  # no card baseline set; nothing to sync
-
-    if ufc_results is None:
-        ufc_results = _load_ufc_results_for(card_date)
-    ufc_winners = _results_lookup(ufc_results)
-
-    client = client or KalshiClient()
-    applied = []
-
-    for notif_path in sorted(NOTIF_DIR.glob(f"{card_date}_*.json")):
-        key = notif_path.stem
-        if key in excluded:
-            continue
-        try:
-            record = json.loads(notif_path.read_text())
-        except json.JSONDecodeError:
-            continue
-        if record.get("dry_run"):
-            continue
-        rec = record.get("recommendation", {})
-        if rec.get("status") != "ok":
-            excluded.add(key)
-            continue
-        orders = rec.get("orders", {})
-        if not orders:
-            excluded.add(key)
-            continue
-        # The watchdog only ever bets one side per fight.
-        side_letter, order = next(iter(orders.items()))
-        bet_ticker = order["token"]
-        bet_price = order["avg_fill_price"]
-
-        # ---- True-up path: PnL already applied provisionally ----
-        if key in provisional:
-            settled_yes = _market_settled(client, bet_ticker)
-            if settled_yes is None:
-                continue  # still awaiting official settlement; PnL already in
-            prov = provisional.pop(key)
-            if bool(settled_yes) != bool(prov["yes_won"]):
-                # Overturned result (rare): reverse provisional PnL, apply correct
-                for acct, delta in prov["pnl"].items():
-                    data[acct] = round(data[acct] - delta, 4)
-                pnl = _per_account_pnl(order["per_account"], settled_yes, bet_price)
-                for acct, delta in pnl.items():
-                    data[acct] = round(data[acct] + delta, 4)
-                applied.append((key, pnl, settled_yes))
-                print(
-                    f"  [sync] {key}: OVERTURNED — provisional reversed, settled PnL applied",
-                    file=sys.stderr,
-                )
-            elif verbose:
-                print(f"  [sync] {key}: settlement confirms provisional result")
-            excluded.add(key)
-            continue
-
-        # ---- New resolution, fastest source first ----
-        # (a) UFC.com result badge: winner known ~1-2 min after the fight.
-        kind, side_won_yes, source = None, None, None
-        fight_meta = record.get("fight", {})
-        fkey = frozenset(
-            {
-                _surname(fight_meta.get("fighter_a_ufc", "")),
-                _surname(fight_meta.get("fighter_b_ufc", "")),
-            }
-        )
-        ufc_winner = ufc_winners.get(fkey)
-        if ufc_winner is not None:
-            kind = "provisional"
-            side_won_yes = _surname(ufc_winner) == _surname(order["side_name"])
-            source = "ufc"
-        else:
-            # (b) Kalshi market: settled (final) or legacy pin (provisional).
-            resolution = _market_resolved(client, bet_ticker, record.get("fight_date_utc"))
-            if resolution is None:
-                if verbose:
-                    print(f"  [sync] {key}: not resolved yet")
+    lock_path = BANKROLLS_PATH.with_suffix(".lock")
+    with lock_path.open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        data = _load()
+        anchor = data.get("fill_ledger")
+        if anchor is None:
+            anchor = migration_anchor(data)
+        fills = json.loads(FILLS_PATH.read_text()) if FILLS_PATH.exists() else {}
+        records = []
+        for path in sorted(NOTIF_DIR.glob("*.json")) + sorted((NOTIF_DIR / "revisions").glob("*.json")):
+            records.append(json.loads(path.read_text()))
+        provisional = reconcile(anchor, fills, records, anchor.get("resolutions", {}))
+        resolutions = dict(anchor.get("resolutions", {}))
+        client = client or KalshiClient()
+        for ticker in {e["ticker"] for e in provisional["entries"].values()}:
+            if resolutions.get(ticker, {}).get("final"):
                 continue
-            kind, side_won_yes = resolution
-            source = "kalshi"
-            if kind == "closed":
-                # Fight over but result not official — nothing to book yet.
-                if verbose:
-                    print(f"  [sync] {key}: fight ended, awaiting result")
-                continue
+            related = [
+                (r, o)
+                for r in records
+                if not r.get("dry_run")
+                for o in r.get("recommendation", {}).get("orders", {}).values()
+                if o.get("token") == ticker
+            ]
+            start = related[-1][0].get("fight_date_utc") if related else None
+            if start:
+                resolution = _market_resolved(client, ticker, start)
+            else:
+                settled = _market_settled(client, ticker)
+                resolution = ("settled", settled) if settled is not None else None
+            if not resolution or resolution[0] != "settled":
+                from ufc_pred.ingest.identity import canonical, normalise
 
-        pnl = _per_account_pnl(order["per_account"], side_won_yes, bet_price)
-        # Apply
-        for acct, delta in pnl.items():
-            data[acct] = round(data[acct] + delta, 4)
-        if kind == "settled":
-            excluded.add(key)
-        else:
-            provisional[key] = {"yes_won": bool(side_won_yes), "pnl": pnl, "source": source}
-        applied.append((key, pnl, side_won_yes))
+                for record, order in related:
+                    fight = record.get("fight", {})
+                    wc = fight.get("weight_class")
+                    try:
+                        pair = {
+                            normalise(canonical(fight.get("fighter_a_ufc", ""), wc)),
+                            normalise(canonical(fight.get("fighter_b_ufc", ""), wc)),
+                        }
+                        for result in ufc_results or []:
+                            if result.winner and pair == {
+                                normalise(canonical(result.fighter_red, wc)),
+                                normalise(canonical(result.fighter_blue, wc)),
+                            }:
+                                won = normalise(canonical(result.winner, wc)) == normalise(
+                                    canonical(order["side_name"], wc)
+                                )
+                                resolution = ("provisional", won)
+                    except ValueError:
+                        pass  # Ambiguous identities may only settle via the venue.
+
+            if resolution and resolution[0] in ("settled", "provisional"):
+                resolutions[ticker] = {"yes_won": bool(resolution[1]), "final": resolution[0] == "settled"}
+        ledger = reconcile(anchor, fills, records, resolutions)
+        data["fill_ledger"] = ledger
+        for account in ("A", "B", "C"):
+            data[account] = round(ledger["equity"][account], 6)
+        data["last_synced"] = datetime.now(UTC).isoformat()
+        temp = BANKROLLS_PATH.with_suffix(".tmp")
+        temp.write_text(json.dumps(data, indent=2))
+        temp.replace(BANKROLLS_PATH)
         if verbose:
-            side_name = order["side_name"]
-            outcome = "WON" if side_won_yes else "LOST"
-            tag = "" if kind == "settled" else f" (provisional, via {source})"
-            print(
-                f"  [sync] {key}: {side_name} {outcome}{tag} | "
-                + " ".join(f"{a}=${v:+.2f}" for a, v in pnl.items())
-            )
-
-    # Persist updated state
-    state["fights_excluded"] = sorted(excluded)
-    state["fights_provisional"] = provisional
-    data["card_state"] = state
-    data["last_synced"] = datetime.now(UTC).isoformat()
-    _save(data)
-
-    if verbose and applied:
-        print(
-            f"  [sync] applied {len(applied)} fight(s); "
-            + f"bankrolls now A=${data['A']:.2f} B=${data['B']:.2f} C=${data['C']:.2f}"
-        )
-    elif verbose:
-        print("  [sync] no new resolved fights")
-    if verbose:
-        # Reconciliation hint only: cash excludes open-position value, so
-        # mid-card it will read LOW vs the virtual ledger. Big divergence
-        # post-card = drift worth investigating.
-        try:
-            cash = client.get_balance().get("balance", 0) / 100.0
-            virtual = data["A"] + data["B"] + data["C"]
-            print(
-                f"  [sync] Kalshi cash ${cash:.2f} (excl. open positions) | "
-                f"virtual ledger total ${virtual:.2f}"
-            )
-        except Exception:
-            pass
-
-    return data
+            print(f"[fills ledger] {len(ledger['entries'])} fills, {len(ledger['quarantine'])} quarantined")
+        return data
 
 
 def main():

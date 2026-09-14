@@ -1,0 +1,123 @@
+{
+  "changes": [
+    {
+      "date": "2018-06-09",
+      "red": "CM Punk",
+      "blue": "Mike Jackson",
+      "old": "Blue",
+      "corrected": "NC",
+      "source": "http://ufcstats.com/fight-details/64756e0f4b305da8"
+    },
+    {
+      "date": "2018-11-10",
+      "red": "Chas Skelly",
+      "blue": "Bobby Moffett",
+      "old": "Blue",
+      "corrected": "NC",
+      "source": "http://ufcstats.com/fight-details/04d37c1c206c0efd"
+    },
+    {
+      "date": "2019-10-05",
+      "red": "Khalid Taha",
+      "blue": "Bruno Silva [FLW]",
+      "old": "Red",
+      "corrected": "NC",
+      "source": "http://ufcstats.com/fight-details/57ff0eb2351979c4"
+    },
+    {
+      "date": "2019-12-07",
+      "red": "Mallory Martin",
+      "blue": "Virna Jandiroba",
+      "old": "Red",
+      "corrected": "Blue",
+      "source": "http://ufcstats.com/fight-details/652a956adab8ad0e"
+    },
+    {
+      "date": "2020-02-08",
+      "red": "Domingo Pilarte",
+      "blue": "Journey Newson",
+      "old": "Blue",
+      "corrected": "NC",
+      "source": "http://ufcstats.com/fight-details/5ab2a4fec735e0b2"
+    },
+    {
+      "date": "2020-05-30",
+      "red": "Jamahal Hill",
+      "blue": "Klidson Abreu",
+      "old": "Red",
+      "corrected": "NC",
+      "source": "http://ufcstats.com/fight-details/0fcf42b68f2f0fa3"
+    },
+    {
+      "date": "2020-06-20",
+      "red": "Marc-Andre Barriault",
+      "blue": "Oskar Piechota",
+      "old": "Red",
+      "corrected": "NC",
+      "source": "http://ufcstats.com/fight-details/f044802db5688bbe"
+    },
+    {
+      "date": "2020-07-25",
+      "red": "Nicolas Dalby",
+      "blue": "Jesse Ronson",
+      "old": "Blue",
+      "corrected": "NC",
+      "source": "http://ufcstats.com/fight-details/407e1c6850e7022c"
+    },
+    {
+      "date": "2020-08-22",
+      "red": "Timur Valiev",
+      "blue": "Trevin Jones",
+      "old": "Blue",
+      "corrected": "NC",
+      "source": "http://ufcstats.com/fight-details/7ada9af99946d456"
+    },
+    {
+      "date": "2020-09-12",
+      "red": "Roosevelt Roberts",
+      "blue": "Kevin Croom",
+      "old": "Blue",
+      "corrected": "NC",
+      "source": "http://ufcstats.com/fight-details/e1bb0b615c02d715"
+    },
+    {
+      "date": "2021-01-20",
+      "red": "Mike Davis",
+      "blue": "Mason Jones",
+      "old": "Blue",
+      "corrected": "Red",
+      "source": "http://ufcstats.com/fight-details/031e6624f96aceb8"
+    },
+    {
+      "date": "2021-05-15",
+      "red": "Matt Schnell",
+      "blue": "Rogerio Bontorin",
+      "old": "Blue",
+      "corrected": "NC",
+      "source": "http://ufcstats.com/fight-details/969aa613824c5dfe"
+    },
+    {
+      "date": "2021-07-17",
+      "red": "Alan Baudot",
+      "blue": "Rodrigo Nascimento",
+      "old": "Blue",
+      "corrected": "NC",
+      "source": "http://ufcstats.com/fight-details/7d0874323bd1f768"
+    }
+  ],
+  "excluded": [
+    {
+      "date": "2020-05-09",
+      "red": "Uriah Hall",
+      "blue": "Jacare Souza",
+      "reason": "no completed raw bout at this date; excluded rather than assigned a result"
+    },
+    {
+      "date": "2020-06-27",
+      "red": "Mara Romero Borella",
+      "blue": "Miranda Maverick",
+      "reason": "no completed raw bout at this date; excluded rather than assigned a result"
+    }
+  ],
+  "outcome_vintage_limitation": "final NC revisions lack announcement timestamps; historical as-of publication cannot be proven"
+}

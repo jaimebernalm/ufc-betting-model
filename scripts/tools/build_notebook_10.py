@@ -8,11 +8,10 @@ Simulates the first-fight-week balance-capture lag bug (sizing bankroll lagged
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import nbformat as nbf
 
-ROOT = Path(__file__).resolve().parents[1]
+from ufc_pred.paths import ROOT
+
 OUT = ROOT / "notebooks" / "10_balance_lag_simulation.ipynb"
 
 nb = nbf.v4.new_notebook()
