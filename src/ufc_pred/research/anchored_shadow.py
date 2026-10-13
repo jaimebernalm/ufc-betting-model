@@ -36,9 +36,16 @@ from ufc_pred.research import anchored as A
 from ufc_pred.research import bfo
 from ufc_pred.research.harness import KEYS, SPORTSBOOK_PRIORITY, american_to_prob, load_base, logit
 
-BUNDLE = ROOT / "artifacts/r2026_10/anchored_shadow_bundle"
+# versioned: v0 (first fit, data hashes incomplete) is kept for traceability only
+BUNDLE = ROOT / "artifacts/r2026_10/anchored_shadow_bundle_v1"
 OUTDIR = ROOT / "data/processed/anchored_shadow_2026_10_13"
 MKT_EXTRA = ROOT / "artifacts/r2026_10/claude/mkt_extra.parquet"
+FIT_DATA = [
+    ROOT / "artifacts/shadow_candidate_2026_09_14_v2/training_features.parquet",
+    ROOT / "artifacts/shadow_candidate_2026_09_14_v2/verified_history.parquet",
+    ROOT / "artifacts/r2026_10/claude/bfo/bfo_matched.parquet",
+    MKT_EXTRA,
+]
 # read-only: the live shadow runner's history, used only to recognise debutants
 LIVE_HISTORY = Path("/Users/jaimebernal/Desktop/pred_project/UFC pred/data/processed/shadow_candidate_2026_09_14_v2/history.parquet")
 POLICY = dict(ev_thr=0.02, kelly_frac=0.25, cap_per_fight=0.02, cap_per_card=0.15, edge_ceiling=0.10, fee_coeff=0.07)
@@ -84,7 +91,7 @@ def fit_bundle(before: str, seeds: int = 10) -> Path:
         "flb_slope_a": a_used, "cat_features": cat_used, "policy": POLICY,
         "created_utc": dt.datetime.now(dt.UTC).isoformat(),
         "code_sha256": {str(p.relative_to(ROOT)): _sha(p) for p in code},
-        "data_sha256": {str(MKT_EXTRA.relative_to(ROOT)): _sha(MKT_EXTRA)},
+        "data_sha256": {str(p.relative_to(ROOT)): _sha(p) for p in FIT_DATA},
         "model_sha256": {f"seed{s}.joblib": _sha(BUNDLE / f"seed{s}.joblib") for s in range(seeds)},
     }
     (BUNDLE / "manifest.json").write_text(json.dumps(manifest, indent=2))
@@ -264,15 +271,22 @@ def score_capture(path: Path, manifest: dict, models: list, max_lag_min: float) 
     (lag measured AFTER the network fetch), either fighter is a UFC debutant, or prices
     are missing. Output is a signal log, not an execution record.
     """
-    cap = json.loads(path.read_text())
-    captured = pd.Timestamp(cap["captured_at_utc"])
-    sched = pd.Timestamp(cap["fight_date_utc"]) if cap.get("fight_date_utc") else None
-    rec = {"capture_file": path.name, "captured_at_utc": str(captured),
+    raw = path.read_bytes()
+    cap = json.loads(raw)
+    rec = {"capture_file": path.name, "capture_sha256": hashlib.sha256(raw).hexdigest(),
+           "runner_sha256": _sha(Path(__file__)), "bundle_manifest_sha256": _sha(BUNDLE / "manifest.json"),
            "bundle_fit_before": manifest["fit_before"], "paper_only": True, "executed": False}
+    if not (np.isfinite(max_lag_min) and max_lag_min > 0):
+        raise ValueError("max_lag_min must be finite and positive")
+    captured = pd.to_datetime(cap.get("captured_at_utc"), utc=True, errors="coerce")
+    sched = pd.to_datetime(cap.get("fight_date_utc"), utc=True, errors="coerce")
+    rec["captured_at_utc"] = str(captured)
+    if pd.isna(captured) or pd.isna(sched):
+        return {**rec, "status": "abstain_missing_timestamp"}
     now = pd.Timestamp(dt.datetime.now(dt.UTC))
     if captured > now:
         return {**rec, "status": "abstain_future_timestamp"}
-    if sched is not None and captured >= sched:
+    if captured >= sched:
         return {**rec, "status": "abstain_capture_at_or_after_scheduled_start"}
     if (now - captured).total_seconds() / 60 > max_lag_min:  # cheap pre-check; re-checked after fetch
         return {**rec, "status": "abstain_stale_capture"}
@@ -283,6 +297,8 @@ def score_capture(path: Path, manifest: dict, models: list, max_lag_min: float) 
     row["date"] = pd.to_datetime(row.date)
     red, blue = row.R_fighter.iloc[0], row.B_fighter.iloc[0]
     card_date = row.date.iloc[0]
+    if card_date < pd.Timestamp(manifest["fit_before"]):
+        return {**rec, "status": "abstain_card_before_bundle_fit_date"}
     if min(_prior_ufc_bouts(red, card_date), _prior_ufc_bouts(blue, card_date)) == 0:
         return {**rec, "status": "abstain_debut", "R_fighter": red, "B_fighter": blue}
     slug, page, rows, mu = find_bfo_event(card_date, (red, blue))
@@ -299,7 +315,7 @@ def score_capture(path: Path, manifest: dict, models: list, max_lag_min: float) 
     rec.update(bfo_fetched_utc=str(fetched), lag_bfo_vs_kalshi_min=lag, bfo_event=slug, bfo_matchup=mu)
     if lag > max_lag_min:
         return {**rec, "status": "abstain_markets_not_contemporaneous"}
-    if sched is not None and fetched >= sched:
+    if fetched >= sched:
         return {**rec, "status": "abstain_bfo_fetched_after_scheduled_start"}
     if rows is None:
         return {**rec, "status": "abstain_no_bfo_match"}
@@ -339,7 +355,8 @@ def score_dir(captures: Path, max_lag_min: float) -> list[dict]:
 
 
 def report() -> pd.DataFrame:
-    """All signal records; for would_bet rows, scale per-fight fractions so each card sums <= cap_per_card."""
+    """All signal records. For would_bet rows, the per-card cap is applied AFTER the fact as a
+    descriptive scaling of hypothetical fractions -- it is not online sizing with reserved cash."""
     recs = [json.loads(p.read_text()) for p in sorted(OUTDIR.glob("*.anchored.json"))]
     d = pd.DataFrame(recs)
     if d.empty or "signal" not in d:

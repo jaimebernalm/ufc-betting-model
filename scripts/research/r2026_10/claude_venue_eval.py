@@ -128,7 +128,7 @@ def main():
         t.to_parquet(OUT / f"claude/venue_kalshi_{anchor}.parquet", index=False)
     # descriptive common universe: same fights for every model and both anchors, non-debut only
     deb = load_base()[KEYS + ["debut"]]
-    tb = pd.read_parquet(OUT / "claude/venue_kalshi_q_book.parquet").merge(deb, on=KEYS, how="left")
+    tb = pd.read_parquet(OUT / "claude/venue_kalshi_q_book.parquet").drop(columns=["debut"], errors="ignore").merge(deb, on=KEYS, how="left")
     tk = pd.read_parquet(OUT / "claude/venue_kalshi_q_kalshi_mid.parquet")
     common = tb[(tb.debut == False) & tb.p_old_deployed.notna()][KEYS]  # noqa: E712
     for anchor, t in [("q_book", tb), ("q_kalshi_mid", tk)]:
