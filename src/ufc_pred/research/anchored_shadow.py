@@ -109,6 +109,10 @@ def parse_method_props(page: str) -> dict[int, dict[str, dict[str, float]]]:
     if start < 0:
         return {}
     table = page[start: page.find("</table>", start)]
+    thead = table.partition("<tbody")[0]
+    books = {int(b): bfo._text(inner.split("<br", 1)[0])
+             for b, inner in re.findall(r'<th scope="col" data-b="(\d+)">(.*?)</th>', thead, re.S)}
+    allowed = {b for b, name in books.items() if name in SPORTSBOOK_PRIORITY}  # never Kalshi/Polymarket
     out: dict[int, dict[str, dict[str, list]]] = {}
     for tr in re.split(r"<tr\b", table.partition("<tbody")[2])[1:]:
         if 'class="pr"' not in tr[: tr.find(">")]:
@@ -122,7 +126,9 @@ def parse_method_props(page: str) -> dict[int, dict[str, dict[str, float]]]:
             continue
         who, kind = pm.group(1).strip(), {"tko/ko": "ko", "submission": "sub", "decision": "dec"}[pm.group(2).lower()]
         cells = re.findall(r'data-li="\[(\d+),(\d),(\d+)[^\]]*\]"><span[^>]*>([^<]*)</span>', tr)
-        for _book, _side, mu, odds in cells:
+        for book, _side, mu, odds in cells:
+            if int(book) not in allowed:
+                continue
             v = bfo._american(odds)
             if v is None or abs(v) < 100:
                 continue
@@ -203,11 +209,17 @@ def kalshi_asks_for(cap: dict, red: str) -> dict:
     raise ValueError(f"cannot orient Kalshi asks: {red!r} not in {tick_a!r}/{tick_b!r}")
 
 
+def _valid_prob(x) -> bool:
+    return x is not None and np.isfinite(x) and 0.0 < float(x) < 1.0
+
+
 def decide(p_red: float, q: float, asks: dict) -> dict:
+    if not (_valid_prob(p_red) and _valid_prob(q)):
+        return {"signal": "invalid_probability"}
     fee = POLICY["fee_coeff"]
     sides = []
     for side, p, ask, mkt in [("R", p_red, asks["R_ask"], q), ("B", 1 - p_red, asks["B_ask"], 1 - q)]:
-        if ask is None or not (0 < ask < 1):
+        if not _valid_prob(ask):
             continue
         cost = ask + fee * ask * (1 - ask)
         ev = p / cost - 1
@@ -268,6 +280,14 @@ def score_capture(path: Path, manifest: dict, models: list, max_lag_min: float) 
         return {**rec, "status": "abstain_debut", "R_fighter": red, "B_fighter": blue}
     slug, page, rows, mu = find_bfo_event(card_date, (red, blue))
     fetched = pd.Timestamp(dt.datetime.now(dt.UTC))
+    if page is not None:  # immutable copy + hash: the shared BFO cache is overwritten by refresh fetches
+        import gzip
+
+        digest = hashlib.sha256(page.encode()).hexdigest()
+        ev_dir = OUTDIR / "bfo_html"
+        ev_dir.mkdir(parents=True, exist_ok=True)
+        (ev_dir / f"{path.stem}.{digest[:16]}.html.gz").write_bytes(gzip.compress(page.encode()))
+        rec["bfo_html_sha256"] = digest
     lag = (fetched - captured).total_seconds() / 60
     rec.update(bfo_fetched_utc=str(fetched), lag_bfo_vs_kalshi_min=lag, bfo_event=slug, bfo_matchup=mu)
     if lag > max_lag_min:
