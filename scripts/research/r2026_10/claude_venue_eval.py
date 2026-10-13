@@ -86,17 +86,13 @@ def summarize(d: pd.DataFrame, pcol: str, thr: float) -> dict:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cands", default="R1,R3,G0,MF")
     ap.add_argument("--seeds", type=int, default=10)
-    ap.add_argument("--perf", default=None)
     args = ap.parse_args()
     opp = pd.read_parquet(OPP)
     base = load_base(fill_bfo_from="2024-01-01")
+    mkt = pd.read_parquet(OUT / "claude/mkt_extra.parquet")
+    base = base.merge(mkt, on=KEYS, how="left", validate="one_to_one")
     feats = pd.concat([base, capture_rows(opp, base)], ignore_index=True)
-    if args.perf:
-        for p in args.perf.split(","):
-            feats = feats.merge(pd.read_parquet(p), on=KEYS, how="left")
-    # anchors
     bfo = bfo_exact() if BFO.exists() else None
     d = opp.merge(feats.drop(columns=["y", "card", "year"], errors="ignore"), on=KEYS, how="left")
     d["q_book"] = d.q
@@ -104,11 +100,11 @@ def main():
         d = d.merge(bfo[KEYS + ["q_close_consensus_R"]], on=KEYS, how="left")
         d["q_book"] = d.q_close_consensus_R.fillna(d.q)
     print(f"opportunities {len(d)}; with features {d.R_wins.notna().sum()}; with book q {d.q_book.notna().sum()}")
+    # 2026 refit of the annual protocol: train strictly before 2026-01-01
     train = base[base.date < pd.Timestamp("2026-01-01")].reset_index(drop=True)
     fns = {
-        "R1": A.make_resid_fn(logit_q_feature=True),
-        "R3": A.make_resid_fn(logit_q_feature=True, flb_baseline=True),
-        "G0": A.make_glm_resid_fn(),
+        "F1_R6_mkt": A.make_resid_fn(logit_q_feature=True, flb_baseline=True),
+        "R3": A.make_resid_fn(logit_q_feature=True, flb_baseline=True, drop=list(mkt.columns.drop(KEYS))),
         "MF": A.make_flb_fn(),
     }
     rows = []
@@ -118,15 +114,18 @@ def main():
         t["has_odds"] = True
         t["Winner"] = np.where(t.y == 1, "Red", "Blue")
         t["p_anchor"] = t.q
-        t["p_old"] = t.old_p_R
-        for name in args.cands.split(","):
+        t["p_old_deployed"] = t.old_p_R
+        names = list(fns)
+        for name in names:
             preds = [fns[name](train, t.reset_index(drop=True), s) for s in range(args.seeds)]
             t["p_" + name] = np.mean(preds, axis=0)
-        for c in ["p_anchor", "p_old"] + ["p_" + n for n in args.cands.split(",")]:
+        for c in ["p_anchor", "p_old_deployed"] + ["p_" + n for n in names]:
             for thr in [0.0, 0.02, 0.04]:
                 r = summarize(t, c, thr)
-                r.update(anchor=anchor, ll=float(logloss(t[c], t.y).mean()), ll_kmid=float(logloss(t.q_kalshi_mid, t.y).mean()))
+                r.update(anchor=anchor, n=len(t), ll=float(logloss(t[c], t.y).mean()),
+                         ll_kmid=float(logloss(t.q_kalshi_mid, t.y).mean()))
                 rows.append(r)
+        t.to_parquet(OUT / f"claude/venue_kalshi_{anchor}.parquet", index=False)
     res = pd.DataFrame(rows)
     pd.set_option("display.width", 220)
     print(res.round(4).to_string(index=False))

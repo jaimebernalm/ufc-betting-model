@@ -57,8 +57,11 @@ def load_captures() -> pd.DataFrame:
                     fight_date_utc=fd,
                     card_date=(fd.tz_convert("America/New_York")).tz_localize(None).normalize(),
                     captured_at_utc=pd.Timestamp(j.get("captured_at_utc")),
-                    a=fight.get("fighter_a_ufc"),
-                    b=fight.get("fighter_b_ufc"),
+                    # snapshot asks and model probabilities follow KALSHI's ticker_a/ticker_b order;
+                    # kalshi_swap_vs_ufc=True means ticker_a is the UFC fighter_b
+                    a=fight.get("fighter_b_ufc") if fight.get("kalshi_swap_vs_ufc") else fight.get("fighter_a_ufc"),
+                    b=fight.get("fighter_a_ufc") if fight.get("kalshi_swap_vs_ufc") else fight.get("fighter_b_ufc"),
+                    swap_vs_ufc=fight.get("kalshi_swap_vs_ufc"),
                     a_ask=ks.get("a_ask"),
                     b_ask=ks.get("b_ask"),
                     a_bid=ks.get("a_bid"),
