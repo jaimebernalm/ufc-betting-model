@@ -22,7 +22,7 @@ DST = OUT / "claude"
 
 def candidates(threads: int, extra: pd.DataFrame | None):
     perf_cols = [c for c in (extra.columns if extra is not None else []) if c not in ("date", "R_fighter", "B_fighter")]
-    perf_signed = [c for c in perf_cols if c.startswith("diff_") or c.endswith("_diff")]
+    perf_signed = []  # extra columns follow the R_/B_ and *_dif conventions; swap handles them
     return {
         "A1": (A.make_stats_fn(threads=threads), False),
         "A1s": (A.make_stats_fn(params=dict(iterations=400, learning_rate=0.03, depth=4, l2_leaf_reg=10, rsm=0.5),
@@ -36,7 +36,7 @@ def candidates(threads: int, extra: pd.DataFrame | None):
                                 keep=A.GLM_DIFFS + ["weight_class", "gender", "title_bout", "no_of_rounds"]), True),
         "G0": (A.make_glm_resid_fn(), True),
         "G0n": (A.make_glm_resid_fn(flb=False), True),
-        "G1": (A.make_glm_resid_fn(cols=A.GLM_DIFFS + perf_signed), True),
+        "G1": (A.make_glm_resid_fn(cols=A.GLM_DIFFS + [c for c in perf_cols if c.endswith("_dif")]), True),
         "R4": (A.make_resid_fn(threads=threads, logit_q_feature=True, flb_baseline=True, signed_extra=perf_signed), True),
         # extra columns follow the R_/B_ and *_dif conventions, so swap handling is automatic
         "R6": (A.make_resid_fn(threads=threads, logit_q_feature=True, flb_baseline=True), True),
@@ -67,13 +67,21 @@ def main():
     years = [2024, 2025, 2026] if args.holdout else DEV_YEARS
     split = "holdout" if args.holdout else "dev"
     cands = candidates(args.threads, extra)
+    uses_extra = {"R2", "R4", "R6", "G1", "G2"}
     for name in args.cands.split(","):
+        # a candidate without extra features must never see --perf columns (and vice versa)
+        assert (name in uses_extra) == (extra is not None), f"{name}: --perf mismatch"
         fn, need_odds = cands[name]
         t0 = time.monotonic()
         wf = WalkForward(years=years, seeds=list(range(args.seeds)), require_odds=False)
         oof = wf.run(df, fn, name + args.tag)
         path = DST / f"oof_{split}_{name}{args.tag}.parquet"
         oof.to_parquet(path, index=False)
+        side = {"extra_files": args.perf, "extra_columns": [c for c in (extra.columns if extra is not None else []) if c not in ("date", "R_fighter", "B_fighter")],
+                "feature_names": getattr(fn, "feature_names", None), "glm_fits": getattr(fn, "fits", None)}
+        import json
+
+        path.with_suffix(".features.json").write_text(json.dumps(side, indent=1, default=str))
         print(f"{name}: {len(oof)} rows -> {path.name} ({time.monotonic() - t0:.0f}s)", flush=True)
 
 

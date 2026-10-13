@@ -129,17 +129,22 @@ def make_glm_resid_fn(cols: list[str] = GLM_DIFFS, C: float = 0.05, half_life: f
         def loss(beta):
             z = off + X @ beta
             p = sigmoid(z)
-            ll = -(w * (y * np.log(p + 1e-12) + (1 - y) * np.log(1 - p + 1e-12))).mean()
+            ll = (w * (np.logaddexp(0.0, z) - y * z)).mean()
             g = -(X * (w * (y - p))[:, None]).mean(0)
             return ll + lam * beta @ beta, g + 2 * lam * beta
 
-        beta = minimize(loss, np.zeros(X.shape[1]), jac=True, method="L-BFGS-B").x
+        res = minimize(loss, np.zeros(X.shape[1]), jac=True, method="L-BFGS-B")
+        if not res.success or not np.all(np.isfinite(res.x)) or np.abs(res.jac).max() > 1e-3:
+            raise RuntimeError(f"GLM offset fit did not converge: {res.message}, max|grad|={np.abs(res.jac).max():.2e}")
+        beta = res.x
+        fn.fits.append(dict(test_start=str(ref.date()), n=len(y), a=a, nit=int(res.nit), max_grad=float(np.abs(res.jac).max())))
         out = np.full(len(test), np.nan)
         ok = test.has_odds.to_numpy()
         Xt, _ = design(test[ok], stats)
         out[ok] = sigmoid(a * logit(test.q[ok].to_numpy()) + Xt @ beta)
         return out
 
+    fn.fits = []
     return fn
 
 
@@ -187,6 +192,7 @@ def make_resid_fn(
         m = CatBoostClassifier(**params, loss_function="Logloss", random_seed=seed, verbose=False,
                                allow_writing_files=False, thread_count=threads)
         m.fit(Pool(X, y, cat_features=cat, weight=w, baseline=base))
+        fn.feature_names = list(m.feature_names_)
         out = np.full(len(test), np.nan)
         ok = test.has_odds.to_numpy()
         if not ok.any():

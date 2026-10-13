@@ -58,27 +58,46 @@ def logloss(p, y) -> np.ndarray:
 
 
 BFO_MATCHED = ROOT / "artifacts/r2026_10/claude/bfo/bfo_matched.parquet"
-SPORTSBOOKS = ["BetMGM", "BetRivers", "BetWay", "Caesars", "DraftKings", "FanDuel", "Unibet"]
+# Fixed priority: the first sportsbook with BOTH sides quoted supplies the offered price.
+SPORTSBOOK_PRIORITY = ["DraftKings", "FanDuel", "BetMGM", "Caesars", "BetRivers", "Unibet", "BetWay"]
+
+
+def bfo_exact() -> pd.DataFrame:
+    """BFO rows with an unambiguous exact-name match (initial/loose/multi-candidate quarantined)."""
+    b = pd.read_parquet(BFO_MATCHED)
+    b = b[b.bfo_matchup_id.notna() & b.match_method.isin(["exact", "exact_date+1"])]
+    b = b.drop_duplicates(subset=KEYS, keep=False).drop_duplicates(subset=["bfo_matchup_id"], keep=False)
+    return b.reset_index(drop=True)
 
 
 def _fill_from_bfo(df: pd.DataFrame) -> pd.DataFrame:
-    """Fill missing Kaggle closing odds with BFO sportsbook closes (median American line per side).
+    """Fill missing Kaggle closing odds with one concrete BFO sportsbook pair (fixed priority).
 
-    Declared before the holdout look (manifest): used only for holdout years, so the 2026 gap
-    in the Kaggle export does not shrink the evaluation set. Kalshi/Polymarket columns are not
-    sportsbooks and are never used here.
+    Declared before the holdout look (manifest). A real offered pair from a single book is used
+    (never a cross-book median of American odds, which is not a price and can be invalid).
+    Kalshi/Polymarket are not sportsbooks and are never used here.
     """
     b = pd.read_parquet(BFO_MATCHED)
-    b = b[b.bfo_matchup_id.notna()].drop_duplicates(subset=KEYS)
-    r = b[[f"R_close_{x}" for x in SPORTSBOOKS if f"R_close_{x}" in b]].median(axis=1)
-    bb = b[[f"B_close_{x}" for x in SPORTSBOOKS if f"B_close_{x}" in b]].median(axis=1)
-    fill = b[KEYS].assign(bfo_R=r.to_numpy(), bfo_B=bb.to_numpy())
+    # only unambiguous exact-name matches feed the fill; initial/loose matches are quarantined
+    b = b[b.bfo_matchup_id.notna() & b.match_method.isin(["exact", "exact_date+1"])]
+    b = b.drop_duplicates(subset=KEYS, keep=False).drop_duplicates(subset=["bfo_matchup_id"], keep=False)
+    b = b.reset_index(drop=True)
+    r_odds = pd.Series(np.nan, index=b.index)
+    b_odds = pd.Series(np.nan, index=b.index)
+    book = pd.Series(None, index=b.index, dtype=object)
+    for name in SPORTSBOOK_PRIORITY:
+        rc, bc = f"R_close_{name}", f"B_close_{name}"
+        if rc not in b:
+            continue
+        take = book.isna() & b[rc].notna() & b[bc].notna() & b[rc].abs().ge(100) & b[bc].abs().ge(100)
+        r_odds[take], b_odds[take], book[take] = b.loc[take, rc], b.loc[take, bc], "bfo_" + name
+    fill = b[KEYS].assign(bfo_R=r_odds.to_numpy(), bfo_B=b_odds.to_numpy(), bfo_book=book.to_numpy())
     out = df.merge(fill, on=KEYS, how="left")
-    miss = out.R_odds.isna() | out.B_odds.isna()
-    out["odds_source"] = np.where(miss & out.bfo_R.notna() & out.bfo_B.notna(), "bfo_median", "kaggle")
-    out.loc[out.odds_source.eq("bfo_median"), "R_odds"] = out.bfo_R
-    out.loc[out.odds_source.eq("bfo_median"), "B_odds"] = out.bfo_B
-    return out.drop(columns=["bfo_R", "bfo_B"])
+    use = (out.R_odds.isna() | out.B_odds.isna()) & out.bfo_book.notna()
+    out["odds_source"] = np.where(use, out.bfo_book, "kaggle")
+    out.loc[use, "R_odds"] = out.loc[use, "bfo_R"]
+    out.loc[use, "B_odds"] = out.loc[use, "bfo_B"]
+    return out.drop(columns=["bfo_R", "bfo_B", "bfo_book"])
 
 
 def load_base(fill_bfo_from: str | None = None) -> pd.DataFrame:
@@ -135,7 +154,8 @@ class WalkForward:
             if test.empty:
                 continue
             preds = np.stack([fn(train.reset_index(drop=True), test.reset_index(drop=True), s) for s in self.seeds])
-            out = test[KEYS + ["card", "year", "y", "q", "R_odds", "B_odds", "debut"]].copy()
+            meta = [c for c in ["odds_source"] if c in test]
+            out = test[KEYS + ["card", "year", "y", "q", "R_odds", "B_odds", "debut"] + meta].copy()
             out["p_" + name] = preds.mean(0)
             out["sd_" + name] = preds.std(0)
             for s, pr in zip(self.seeds, preds):

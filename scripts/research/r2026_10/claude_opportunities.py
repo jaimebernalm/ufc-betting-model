@@ -109,8 +109,13 @@ def main():
     mid_b = (d.B_ask + d.B_bid) / 2
     d["q_kalshi_mid"] = mid_r / (mid_r + mid_b)
     d["card"] = d.date.dt.strftime("%Y-%m-%d")
+    # fight_date_utc is the scheduled segment/card start, not the bout's own start; a capture
+    # within a few minutes after it is still pre-bout for later fights, but timing is NOT verified
+    # per bout -> venue results are a diagnostic, not an executable T-90 backtest.
+    d["minutes_after_sched_start"] = (d.captured_at_utc - d.fight_date_utc).dt.total_seconds() / 60
     cols = ["date", "R_fighter", "B_fighter", "card", "y", "source", "event", "captured_at_utc", "fight_date_utc",
-            "R_ask", "B_ask", "R_bid", "B_bid", "q_kalshi_mid", "volume", "old_p_R", "old_p_R_raw"]
+            "R_ask", "B_ask", "R_bid", "B_bid", "q_kalshi_mid", "volume", "old_p_R", "old_p_R_raw",
+            "minutes_after_sched_start"]
     d[cols].to_parquet(OUT, index=False)
     print(d.groupby("source").size(), d.card.nunique(), "cards ->", OUT)
 

@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 from ufc_pred.research import anchored as A
-from ufc_pred.research.harness import KEYS, OUT, card_bootstrap_mean, load_base, logit, logloss
+from ufc_pred.research.harness import KEYS, OUT, bfo_exact, card_bootstrap_mean, load_base, logit, logloss
 
 OPP = OUT / "opportunities_kalshi.parquet"
 CAPTURES = "data/processed/shadow_candidate_2026_09_14_v2/captures/*.json"
@@ -97,7 +97,7 @@ def main():
         for p in args.perf.split(","):
             feats = feats.merge(pd.read_parquet(p), on=KEYS, how="left")
     # anchors
-    bfo = pd.read_parquet(BFO) if BFO.exists() else None
+    bfo = bfo_exact() if BFO.exists() else None
     d = opp.merge(feats.drop(columns=["y", "card", "year"], errors="ignore"), on=KEYS, how="left")
     d["q_book"] = d.q
     if bfo is not None and "q_close_consensus_R" in bfo:
