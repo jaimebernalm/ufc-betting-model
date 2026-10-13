@@ -67,6 +67,8 @@ def fit_bundle(before: str, seeds: int = 10) -> Path:
     cutoff = pd.Timestamp(before)
     train = base[base.date < cutoff].reset_index(drop=True)
     fn = _model_fn()
+    if (BUNDLE / "manifest.json").exists():
+        raise FileExistsError(f"{BUNDLE} already holds a bundle; never overwrite a shadow bundle in place")
     BUNDLE.mkdir(parents=True, exist_ok=True)
     a_used, cat_used = None, None
     for s in range(seeds):
@@ -89,22 +91,40 @@ def fit_bundle(before: str, seeds: int = 10) -> Path:
     return BUNDLE
 
 
-def load_bundle():
+def load_bundle(check_code: bool = True):
+    """Load and verify: model files, frozen data, policy and (by default) code must match the manifest."""
     manifest = json.loads((BUNDLE / "manifest.json").read_text())
     for name, digest in manifest["model_sha256"].items():
         if _sha(BUNDLE / name) != digest:
             raise RuntimeError(f"bundle file changed: {name}")
+    for rel, digest in manifest["data_sha256"].items():
+        if _sha(ROOT / rel) != digest:
+            raise RuntimeError(f"frozen data changed: {rel}")
+    if manifest["policy"] != POLICY:
+        raise RuntimeError("policy differs from the bundle manifest")
+    if check_code:
+        for rel, digest in manifest["code_sha256"].items():
+            if rel.endswith("anchored_shadow.py"):
+                continue  # this file is the runner; its hash is recorded per bundle for traceability
+            if _sha(ROOT / rel) != digest:
+                raise RuntimeError(f"model code changed since the bundle was fit: {rel}")
     models = [joblib.load(BUNDLE / f"seed{s}.joblib") for s in range(manifest["seeds"])]
     return manifest, models
 
 
 # ------------------------------------------------------------------ BFO live parsing
 
-_PROP = re.compile(r"^(.+?) wins by (TKO/KO|submission|decision)$", re.I)
+# data-li of a prop cell = [book, yes(1), matchup_id, prop_type, fighter_pos]; verified on cached pages
+_PROP_TYPES = {8: "ko", 9: "sub", 11: "dec"}  # "<X> wins by TKO/KO" / "by submission" / "by decision"
 
 
-def parse_method_props(page: str) -> dict[int, dict[str, dict[str, float]]]:
-    """{matchup_id: {surname_label: {'ko'|'sub'|'dec': implied prob from the median decimal price}}}."""
+def parse_method_props(page: str) -> dict[int, dict[int, dict[str, float]]]:
+    """{matchup_id: {fighter_pos: {'ko'|'sub'|'dec': implied prob of the median decimal price}}}.
+
+    Sportsbooks only (header names in SPORTSBOOK_PRIORITY), never Kalshi/Polymarket.
+    The cross-book median differs from the single-source Kaggle props used in training
+    (documented source difference in the prospective protocol).
+    """
     start = page.find('<table class="odds-table">')
     if start < 0:
         return {}
@@ -112,29 +132,20 @@ def parse_method_props(page: str) -> dict[int, dict[str, dict[str, float]]]:
     thead = table.partition("<tbody")[0]
     books = {int(b): bfo._text(inner.split("<br", 1)[0])
              for b, inner in re.findall(r'<th scope="col" data-b="(\d+)">(.*?)</th>', thead, re.S)}
-    allowed = {b for b, name in books.items() if name in SPORTSBOOK_PRIORITY}  # never Kalshi/Polymarket
-    out: dict[int, dict[str, dict[str, list]]] = {}
-    for tr in re.split(r"<tr\b", table.partition("<tbody")[2])[1:]:
-        if 'class="pr"' not in tr[: tr.find(">")]:
+    allowed = {b for b, name in books.items() if name in SPORTSBOOK_PRIORITY}
+    out: dict[int, dict[int, dict[str, list]]] = {}
+    for book, yes, mu, ptype, pos, odds in re.findall(
+        r'data-li="\[(\d+),(\d),(\d+),(\d+),(\d)\]"><span[^>]*>([^<]*)</span>', table
+    ):
+        kind = _PROP_TYPES.get(int(ptype))
+        if kind is None or yes != "1" or int(book) not in allowed:
             continue
-        lm = re.search(r'<th scope="row">(.*?)</th>', tr, re.S)
-        if not lm:
+        v = bfo._american(odds)
+        if v is None or abs(v) < 100:
             continue
-        label = bfo._text(lm.group(1))
-        pm = _PROP.match(label)
-        if not pm:
-            continue
-        who, kind = pm.group(1).strip(), {"tko/ko": "ko", "submission": "sub", "decision": "dec"}[pm.group(2).lower()]
-        cells = re.findall(r'data-li="\[(\d+),(\d),(\d+)[^\]]*\]"><span[^>]*>([^<]*)</span>', tr)
-        for book, _side, mu, odds in cells:
-            if int(book) not in allowed:
-                continue
-            v = bfo._american(odds)
-            if v is None or abs(v) < 100:
-                continue
-            dec = 1 + (100 / -v if v < 0 else v / 100)
-            out.setdefault(int(mu), {}).setdefault(who, {}).setdefault(kind, []).append(dec)
-    return {mu: {w: {k: 1 / float(np.median(v)) for k, v in kinds.items()} for w, kinds in d.items()}
+        dec = 1 + (100 / -v if v < 0 else v / 100)
+        out.setdefault(int(mu), {}).setdefault(int(pos), {}).setdefault(kind, []).append(dec)
+    return {mu: {pos: {k: 1 / float(np.median(v)) for k, v in kinds.items()} for pos, kinds in d.items()}
             for mu, d in out.items()}
 
 
@@ -173,18 +184,14 @@ def book_pair(rows: pd.DataFrame, red: str):
     return None, np.nan, np.nan
 
 
-def props_features(props: dict, red: str, blue: str, q: float) -> dict:
-    surname = {_norm(n).split()[-1]: side for n, side in [(red, "R"), (blue, "B")]}
-    got: dict[str, dict[str, float]] = {}
-    for label, kinds in props.items():
-        side = surname.get(_norm(label).split()[-1])
-        if side:
-            got[side] = kinds
-    if not all(k in got.get(s, {}) for s in "RB" for k in ("ko", "sub", "dec")):
+def props_features(props: dict, red_pos: int, q: float) -> dict:
+    """Same definitions as mkt_extra: logit(props-implied P(red)) - logit(q) and P(inside distance)."""
+    blue_pos = 3 - red_pos
+    if not all(k in props.get(s, {}) for s in (red_pos, blue_pos) for k in ("ko", "sub", "dec")):
         return {"mkt_props_dif": np.nan, "mkt_finish_prob": np.nan}
-    r = sum(got["R"].values())
-    b = sum(got["B"].values())
-    fin = got["R"]["ko"] + got["R"]["sub"] + got["B"]["ko"] + got["B"]["sub"]
+    r = sum(props[red_pos].values())
+    b = sum(props[blue_pos].values())
+    fin = props[red_pos]["ko"] + props[red_pos]["sub"] + props[blue_pos]["ko"] + props[blue_pos]["sub"]
     return {"mkt_props_dif": float(logit(r / (r + b)) - logit(q)), "mkt_finish_prob": float(fin / (r + b))}
 
 
@@ -301,7 +308,8 @@ def score_capture(path: Path, manifest: dict, models: list, max_lag_min: float) 
         return {**rec, "status": "abstain_no_book_pair"}
     pr, pb = american_to_prob(r_odds), american_to_prob(b_odds)
     q = float(pr / (pr + pb))
-    feats = props_features(parse_method_props(page).get(mu, {}), red, blue, q)
+    red_pos = int(rows[rows.fighter_name.map(_norm) == _norm(red)].fighter_pos.iloc[0])
+    feats = props_features(parse_method_props(page).get(mu, {}), red_pos, q)
     row = row.assign(R_odds=r_odds, B_odds=b_odds, q=q, has_odds=True, **feats)
     row = row.drop(columns=[c for c in ["empty_arena"] if c in row])
     fn = _model_fn()
