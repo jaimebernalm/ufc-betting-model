@@ -199,6 +199,26 @@ Los IC son muy anchos. Lo único que se repite en todos los cortes es la direcci
   - **Tests:** las puertas tienen tests sintéticos aislados en un directorio temporal (`tests/research/test_anchored_shadow_gates.py`).
   - **No está conectado a launchd.**
 
+## Pendiente: activar la sombra (aplazado por decisión del usuario, 13-10-2026)
+
+Ya está hecho (commit 89f9c11):
+
+- **Datos de UFCStats actualizados** en un snapshot nuevo y fijado, `data/raw/ufcstats_snapshots/2026-10-11_5e38ebeb9bb8`, que llega hasta el 10 de octubre. Con él, B1/B2 reproducen exactamente las 6 últimas carteleras entrenadas.
+- **Bundle de F1+B1+B2:** `artifacts/r2026_10/anchored_shadow_bundle_f1b_v1`.
+- **Logger para las dos co-candidatas**, con controles y refresco del snapshot como mucho cada 6 h. Comando:
+
+```bash
+"$PY" -m ufc_pred.research.anchored_shadow run --captures "<checkout principal>/data/processed/shadow_candidate_2026_09_14_v2/captures"
+```
+
+Falta **programar ese comando cada minuto** con un LaunchAgent propio (`com.ufcbet.anchored-shadow`), separado del watchdog actual. Instalarlo requiere tu aprobación expresa.
+
+Antes de activarlo:
+- Comprobar que los bundles se verifican.
+- Comprobar que el snapshot está al día.
+- Comprobar que el watchdog v2 sigue escribiendo capturas.
+- Tener en cuenta que ~36% de esas capturas llegan en o tras el inicio estimado, y el logger se abstiene en ellas.
+
 ## Reproducción
 
 Desde el worktree. La ruta del intérprete contiene espacios, así que va entre comillas.
