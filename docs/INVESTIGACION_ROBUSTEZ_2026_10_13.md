@@ -46,7 +46,7 @@ Experimento E0 (`scripts/research/r2026_10/e0_walkforward_vs_market.py`):
   - Underdogs de 0,15-0,25: ganan el 15,5% frente al 20,7% implícito.
 - **Kalshi.** El patrón coincide con la literatura (Bürgi, Deng y Whelan, *Makers and Takers: The Economics of the Kalshi Prediction Market*): los contratos baratos pierden incluso después de comisiones.
 - **El modelo desplegado elegía favorito solo en el 35-40% de sus apuestas.**
-- **Sharpening T=1,25.** Empeora la log-loss (0,700 → 0,734 en dev; 0,653 → 0,670 en 2024-26). En PnL, sin embargo, A0T no fue peor que A0: −5,2% frente a −6,9% por oportunidad en 2024-26. Con estos datos no podemos afirmar que amplificara las pérdidas.
+- **Sharpening T=1,25.** Empeora la log-loss (0,702 → 0,734 en dev; 0,653 → 0,670 en 2024-26). En PnL, sin embargo, A0T no fue peor que A0: −5,2% frente a −6,9% por oportunidad en 2024-26. Con estos datos no podemos afirmar que amplificara las pérdidas.
 
 ### 1.3 Problemas de datos y contratos encontrados en la revisión cruzada
 
