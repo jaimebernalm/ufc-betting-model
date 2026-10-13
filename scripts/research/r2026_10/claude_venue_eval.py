@@ -126,6 +126,17 @@ def main():
                          ll_kmid=float(logloss(t.q_kalshi_mid, t.y).mean()))
                 rows.append(r)
         t.to_parquet(OUT / f"claude/venue_kalshi_{anchor}.parquet", index=False)
+    # descriptive common universe: same fights for every model and both anchors, non-debut only
+    deb = load_base()[KEYS + ["debut"]]
+    tb = pd.read_parquet(OUT / "claude/venue_kalshi_q_book.parquet").merge(deb, on=KEYS, how="left")
+    tk = pd.read_parquet(OUT / "claude/venue_kalshi_q_kalshi_mid.parquet")
+    common = tb[(tb.debut == False) & tb.p_old_deployed.notna()][KEYS]  # noqa: E712
+    for anchor, t in [("q_book", tb), ("q_kalshi_mid", tk)]:
+        t = t.merge(common, on=KEYS)
+        for c in ["p_old_deployed", "p_F1_R6_mkt", "p_R3", "p_MF"]:
+            r = summarize(t, c, 0.02)
+            r.update(anchor=anchor + "|common_nondebut", n=len(t))
+            rows.append(r)
     res = pd.DataFrame(rows)
     pd.set_option("display.width", 220)
     print(res.round(4).to_string(index=False))

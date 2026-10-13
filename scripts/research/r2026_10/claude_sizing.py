@@ -53,21 +53,25 @@ def simulate(df: pd.DataFrame, pcol: str, frac: float, cap: float, card_cap: flo
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--oof", nargs="+", required=True)
+    ap.add_argument("--pcols", default="", help="comma list; default = first p_ column of each file")
+    ap.add_argument("--min-year", type=int, default=2018)
+    ap.add_argument("--out", default="sizing_dev.csv")
     args = ap.parse_args()
     base = load_base()[["date", "R_fighter", "B_fighter", "debut"]]
     rows = []
     for path in args.oof:
         o = pd.read_parquet(path)
         o = o.drop(columns=["debut"], errors="ignore").merge(base, on=["date", "R_fighter", "B_fighter"])
-        o = o[~o.debut & (o.year >= 2018)]
-        pcol = [c for c in o if c.startswith("p_")][0]
-        for frac in [0.1, 0.25]:
-            for cap in [0.02, 0.05]:
-                rows.append(simulate(o, pcol, frac, cap, card_cap=0.15, ev_thr=0.02, edge_ceiling=0.10))
-        rows.append(simulate(o, pcol, 0.25, 1.0, card_cap=1.0, ev_thr=0.02, edge_ceiling=1.0))
+        o = o[~o.debut & (o.year >= args.min_year)]
+        pcols = [c for c in args.pcols.split(",") if c in o] or [[c for c in o if c.startswith("p_")][0]]
+        for pcol in pcols:
+            for frac in [0.1, 0.25]:
+                for cap in [0.02, 0.05]:
+                    rows.append(simulate(o, pcol, frac, cap, card_cap=0.15, ev_thr=0.02, edge_ceiling=0.10))
+            rows.append(simulate(o, pcol, 0.25, 1.0, card_cap=1.0, ev_thr=0.02, edge_ceiling=1.0))
     res = pd.DataFrame(rows)
     print(res.round(3).to_string(index=False))
-    res.to_csv(OUT / "claude/sizing_dev.csv", index=False)
+    res.to_csv(OUT / "claude" / args.out, index=False)
 
 
 if __name__ == "__main__":

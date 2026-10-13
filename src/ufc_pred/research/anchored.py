@@ -183,16 +183,17 @@ def make_resid_fn(
             cat = [c for c in cat if c in cols]
         return X, y, d, cat, base
 
-    def fn(train: pd.DataFrame, test: pd.DataFrame, seed: int) -> np.ndarray:
+    def fit(train: pd.DataFrame, ref, seed: int):
         train = train[train.has_odds]
-        ref = test.date.min() - pd.Timedelta(days=1)
         a = fit_flb_slope(train, half_life, ref) if flb_baseline else 1.0
         X, y, d, cat, base = build(train, True, a)
         w = recency_weights(d, reference_date=ref, half_life_years=half_life)
         m = CatBoostClassifier(**params, loss_function="Logloss", random_seed=seed, verbose=False,
                                allow_writing_files=False, thread_count=threads)
         m.fit(Pool(X, y, cat_features=cat, weight=w, baseline=base))
-        fn.feature_names = list(m.feature_names_)
+        return m, a, cat
+
+    def predict(m, a: float, cat: list[str], test: pd.DataFrame) -> np.ndarray:
         out = np.full(len(test), np.nan)
         ok = test.has_odds.to_numpy()
         if not ok.any():
@@ -213,4 +214,12 @@ def make_resid_fn(
         out[ok] = (p_red + p_red_from_swap) / 2
         return out
 
+    def fn(train: pd.DataFrame, test: pd.DataFrame, seed: int) -> np.ndarray:
+        m, a, cat = fit(train, test.date.min() - pd.Timedelta(days=1), seed)
+        fn.feature_names = list(m.feature_names_)
+        return predict(m, a, cat, test)
+
+    # exposed for the paper-shadow bundle (same code path as the walk-forward)
+    fn.fit = fit
+    fn.predict = predict
     return fn
