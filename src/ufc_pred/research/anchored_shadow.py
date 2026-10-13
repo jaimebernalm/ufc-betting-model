@@ -1,10 +1,11 @@
-"""Paper-only prospective shadow for the market-anchored candidate F1 (R6_mkt).
+"""Paper-only prospective shadow for the market-anchored co-candidates F1 and F1+B1+B2.
 
 It never places orders, never sends notifications and never touches the live
 watchdog, its configs or its bundle. It reads the feature rows and Kalshi
 snapshots that the existing v2 shadow runner already archives, fetches the
 BestFightOdds event page *at scoring time* (sportsbook moneylines + method
-props), and logs what F1 would have done.
+props), and logs what each co-candidate would have done next to the controls
+(contemporaneous sportsbook price, FLB-slope recalibration, Kalshi mid).
 
 Temporal contract: a capture is scored only if the BFO page is fetched within
 `--max-lag-min` minutes AFTER the Kalshi capture (measured after the network
@@ -12,8 +13,9 @@ fetch) and before the scheduled start; otherwise it is logged as an abstention
 and never scored with later prices. Debutants are skipped. Records are signals,
 not executions (`executed: false`).
 
-  python -m ufc_pred.research.anchored_shadow fit --before 2026-10-13
-  python -m ufc_pred.research.anchored_shadow score --captures <dir> [--max-lag-min 10]
+  python -m ufc_pred.research.anchored_shadow fit --candidate F1B --before 2026-10-13
+  python -m ufc_pred.research.anchored_shadow refresh-ufcstats
+  python -m ufc_pred.research.anchored_shadow run --captures <dir>     # what launchd calls every minute
   python -m ufc_pred.research.anchored_shadow report
 """
 
@@ -36,10 +38,23 @@ from ufc_pred.research import anchored as A
 from ufc_pred.research import bfo
 from ufc_pred.research.harness import KEYS, SPORTSBOOK_PRIORITY, american_to_prob, load_base, logit
 
-# versioned: v0 (first fit, data hashes incomplete) is kept for traceability only
-BUNDLE = ROOT / "artifacts/r2026_10/anchored_shadow_bundle_v1"
 OUTDIR = ROOT / "data/processed/anchored_shadow_2026_10_13"
 MKT_EXTRA = ROOT / "artifacts/r2026_10/claude/mkt_extra.parquet"
+PERF_B1 = ROOT / "artifacts/r2026_10/codex/perf_features.parquet"
+PERF_B2 = ROOT / "artifacts/r2026_10/codex/perf_adjusted.parquet"
+SNAPSHOTS = ROOT / "data/raw/ufcstats_snapshots"
+UPSTREAM = "Greco1899/scrape_ufc_stats"
+UFCSTATS_FILES = ("ufc_event_details.csv", "ufc_fight_details.csv", "ufc_fight_results.csv",
+                  "ufc_fight_stats.csv", "ufc_fighter_details.csv", "ufc_fighter_tott.csv")
+MAX_B_HISTORY_LAG_DAYS = 14  # B1/B2 older than this at the card date -> F1B abstains
+# Co-candidates fixed on 2026-10-13 before any prospective data (report section 4).
+# Bundles are versioned and never overwritten; v0 of F1 is kept for traceability only.
+CANDIDATES = {
+    "F1": dict(bundle=ROOT / "artifacts/r2026_10/anchored_shadow_bundle_v1", extra=[MKT_EXTRA], perf=False,
+               label="F1 = R6_mkt"),
+    "F1B": dict(bundle=ROOT / "artifacts/r2026_10/anchored_shadow_bundle_f1b_v1",
+                extra=[MKT_EXTRA, PERF_B1, PERF_B2], perf=True, label="F1+B1+B2 = R6_mkt + B1v2 + B2"),
+}
 FIT_DATA = [
     ROOT / "artifacts/shadow_candidate_2026_09_14_v2/training_features.parquet",
     ROOT / "artifacts/shadow_candidate_2026_09_14_v2/verified_history.parquet",
@@ -68,42 +83,51 @@ def _model_fn():
 # ------------------------------------------------------------------ fit
 
 
-def fit_bundle(before: str, seeds: int = 10) -> Path:
+def fit_bundle(name: str, before: str, seeds: int = 10) -> Path:
+    cand = CANDIDATES[name]
+    bundle = cand["bundle"]
+    if (bundle / "manifest.json").exists():
+        raise FileExistsError(f"{bundle} already holds a bundle; never overwrite a shadow bundle in place")
     base = load_base(fill_bfo_from="2024-01-01")
-    base = base.merge(pd.read_parquet(MKT_EXTRA), on=KEYS, how="left", validate="one_to_one")
+    for extra in cand["extra"]:
+        base = base.merge(pd.read_parquet(extra), on=KEYS, how="left", validate="one_to_one")
     cutoff = pd.Timestamp(before)
     train = base[base.date < cutoff].reset_index(drop=True)
     fn = _model_fn()
-    if (BUNDLE / "manifest.json").exists():
-        raise FileExistsError(f"{BUNDLE} already holds a bundle; never overwrite a shadow bundle in place")
-    BUNDLE.mkdir(parents=True, exist_ok=True)
-    a_used, cat_used = None, None
+    bundle.mkdir(parents=True, exist_ok=True)
+    a_used, cat_used, feats = None, None, None
     for s in range(seeds):
         m, a, cat = fn.fit(train, cutoff - pd.Timedelta(days=1), s)
-        joblib.dump(m, BUNDLE / f"seed{s}.joblib")
-        a_used, cat_used = a, cat
+        joblib.dump(m, bundle / f"seed{s}.joblib")
+        a_used, cat_used, feats = a, cat, list(m.feature_names_)
     code = [ROOT / "src/ufc_pred/research/anchored.py", ROOT / "src/ufc_pred/research/harness.py",
             ROOT / "src/ufc_pred/research/anchored_shadow.py", ROOT / "src/ufc_pred/research/bfo.py"]
+    if cand["perf"]:
+        code += [ROOT / "src/ufc_pred/research/perf_features.py", ROOT / "src/ufc_pred/research/perf_adjusted.py",
+                 ROOT / "src/ufc_pred/research/perf_future.py"]
+    data = list(dict.fromkeys(FIT_DATA + cand["extra"]))
     manifest = {
-        "candidate": "F1 = R6_mkt (frozen 2026-10-13, see artifacts/r2026_10/manifest.json)",
-        "status": "PAPER SHADOW ONLY - not confirmed on holdout (G1 upper +0.0002); no real money",
-        "fit_before": before, "n_train": int(train.has_odds.sum()), "seeds": seeds,
-        "flb_slope_a": a_used, "cat_features": cat_used, "policy": POLICY,
+        "candidate": cand["label"] + " (co-candidate fixed 2026-10-13; see docs/INVESTIGACION_ROBUSTEZ_2026_10_13.md)",
+        "status": "PAPER SHADOW ONLY - exploratory prospective study; no real money",
+        "fit_before": before, "training_data_ends": str(train.date.max().date()),
+        "n_train": int(train.has_odds.sum()), "seeds": seeds,
+        "flb_slope_a": a_used, "cat_features": cat_used, "feature_names": feats, "policy": POLICY,
         "created_utc": dt.datetime.now(dt.UTC).isoformat(),
         "code_sha256": {str(p.relative_to(ROOT)): _sha(p) for p in code},
-        "data_sha256": {str(p.relative_to(ROOT)): _sha(p) for p in FIT_DATA},
-        "model_sha256": {f"seed{s}.joblib": _sha(BUNDLE / f"seed{s}.joblib") for s in range(seeds)},
+        "data_sha256": {str(p.relative_to(ROOT)): _sha(p) for p in data},
+        "model_sha256": {f"seed{s}.joblib": _sha(bundle / f"seed{s}.joblib") for s in range(seeds)},
     }
-    (BUNDLE / "manifest.json").write_text(json.dumps(manifest, indent=2))
-    return BUNDLE
+    (bundle / "manifest.json").write_text(json.dumps(manifest, indent=2))
+    return bundle
 
 
-def load_bundle(check_code: bool = True):
-    """Load and verify: model files, frozen data, policy and (by default) code must match the manifest."""
-    manifest = json.loads((BUNDLE / "manifest.json").read_text())
-    for name, digest in manifest["model_sha256"].items():
-        if _sha(BUNDLE / name) != digest:
-            raise RuntimeError(f"bundle file changed: {name}")
+def load_bundle(name: str = "F1", check_code: bool = True):
+    """Load and verify: model files, frozen data, policy and (by default) model code must match the manifest."""
+    bundle = CANDIDATES[name]["bundle"]
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    for fname, digest in manifest["model_sha256"].items():
+        if _sha(bundle / fname) != digest:
+            raise RuntimeError(f"bundle file changed: {fname}")
     for rel, digest in manifest["data_sha256"].items():
         if _sha(ROOT / rel) != digest:
             raise RuntimeError(f"frozen data changed: {rel}")
@@ -112,11 +136,104 @@ def load_bundle(check_code: bool = True):
     if check_code:
         for rel, digest in manifest["code_sha256"].items():
             if rel.endswith("anchored_shadow.py"):
-                continue  # this file is the runner; its hash is recorded per bundle for traceability
+                continue  # this file is the runner; its hash is recorded per bundle and per record
             if _sha(ROOT / rel) != digest:
                 raise RuntimeError(f"model code changed since the bundle was fit: {rel}")
-    models = [joblib.load(BUNDLE / f"seed{s}.joblib") for s in range(manifest["seeds"])]
+    models = [joblib.load(bundle / f"seed{s}.joblib") for s in range(manifest["seeds"])]
     return manifest, models
+
+
+def load_bundles(names=None) -> dict:
+    """All co-candidate bundles that exist on disk (a missing bundle is skipped, never fitted here)."""
+    out = {}
+    for name in names or CANDIDATES:
+        if (CANDIDATES[name]["bundle"] / "manifest.json").exists():
+            out[name] = load_bundle(name)
+    if "F1" not in out:
+        raise RuntimeError("the F1 bundle is required (it carries the FLB slope used by the control)")
+    return out
+
+
+# ------------------------------------------------------------------ UFCStats snapshots (for B1/B2)
+
+
+def current_snapshot() -> Path:
+    marker = SNAPSHOTS / "CURRENT"
+    if marker.exists():
+        return SNAPSHOTS / marker.read_text().strip()
+    dirs = sorted(p for p in SNAPSHOTS.iterdir() if p.is_dir() and not p.name.startswith("."))
+    if not dirs:
+        raise FileNotFoundError(f"no UFCStats snapshot under {SNAPSHOTS}")
+    return dirs[-1]
+
+
+def refresh_ufcstats(min_interval_hours: float = 6.0, force: bool = False) -> dict:
+    """Pin the newest upstream export (public GitHub repo refreshed daily) as a new versioned snapshot.
+
+    Never edits an existing snapshot or the frozen data/raw/ufcstats_export. The new snapshot becomes
+    CURRENT only after it parses with the same loader B1/B2 use and does not go back in time.
+    """
+    import requests
+
+    from ufc_pred.research.perf_features import load_bouts
+
+    SNAPSHOTS.mkdir(parents=True, exist_ok=True)
+    state_path = SNAPSHOTS / "refresh_state.json"
+    state = json.loads(state_path.read_text()) if state_path.exists() else {}
+    now = dt.datetime.now(dt.UTC)
+    last = state.get("last_check_utc")
+    if not force and last and (now - dt.datetime.fromisoformat(last)).total_seconds() < min_interval_hours * 3600:
+        return {"status": "skipped_recent_check", **state}
+    resp = requests.get(f"https://api.github.com/repos/{UPSTREAM}/commits", params={"per_page": 1}, timeout=30)
+    resp.raise_for_status()
+    commit = resp.json()[0]
+    sha, when = commit["sha"], commit["commit"]["committer"]["date"]
+    name = f"{when[:10]}_{sha[:12]}"
+    target = SNAPSHOTS / name
+    state.update(last_check_utc=now.isoformat(), upstream_sha=sha, upstream_date=when)
+    if not target.exists():
+        tmp = SNAPSHOTS / f".tmp_{name}"
+        tmp.mkdir(parents=True, exist_ok=True)
+        for f in UFCSTATS_FILES:
+            r = requests.get(f"https://raw.githubusercontent.com/{UPSTREAM}/{sha}/{f}", timeout=180)
+            r.raise_for_status()
+            (tmp / f).write_bytes(r.content)
+        (tmp / "SOURCE_COMMIT").write_text(sha + "\n")
+        obs, _ = load_bouts(tmp)  # must parse with the B1/B2 loader
+        try:
+            prev = current_snapshot()
+        except FileNotFoundError:
+            prev = None
+        if prev is not None and prev.exists():
+            prev_max = load_bouts(prev)[0].date.max()
+            if obs.date.max() < prev_max:
+                raise RuntimeError(f"upstream export goes back in time ({obs.date.max()} < {prev_max})")
+        tmp.rename(target)
+        state["new_snapshot"] = name
+    (SNAPSHOTS / "CURRENT").write_text(name + "\n")
+    state["current"] = name
+    state_path.write_text(json.dumps(state, indent=2))
+    return {"status": "ok", **state}
+
+
+_OBS_CACHE: dict = {}
+
+
+def target_performance(row: pd.DataFrame, card_date: pd.Timestamp):
+    """B1/B2 (34 columns) for one scheduled fight, as of the card day, from the CURRENT snapshot."""
+    from ufc_pred.research.perf_features import load_bouts
+    from ufc_pred.research.perf_future import build_future_performance
+
+    snap = current_snapshot()
+    if snap not in _OBS_CACHE:
+        _OBS_CACHE.clear()
+        _OBS_CACHE[snap] = load_bouts(snap)[0]
+    targets = row[KEYS + ["weight_class"]].copy()
+    targets["date"] = pd.Timestamp(card_date.date())
+    out, diag = build_future_performance(_OBS_CACHE[snap], targets, card_date.date().isoformat())
+    diag = {k: diag[k] for k in ("as_of", "latest_prior_date", "source_history_lag_days", "prior_bouts")}
+    diag["snapshot"] = snap.name
+    return out.drop(columns=KEYS), diag
 
 
 # ------------------------------------------------------------------ BFO live parsing
@@ -217,10 +334,17 @@ def kalshi_asks_for(cap: dict, red: str) -> dict:
     tick_a = fight["fighter_b_ufc"] if swap else fight["fighter_a_ufc"]
     tick_b = fight["fighter_a_ufc"] if swap else fight["fighter_b_ufc"]
     if _norm(red) == _norm(tick_a):
-        return {"R_ask": ks["a_ask"], "B_ask": ks["b_ask"]}
-    if _norm(red) == _norm(tick_b):
-        return {"R_ask": ks["b_ask"], "B_ask": ks["a_ask"]}
-    raise ValueError(f"cannot orient Kalshi asks: {red!r} not in {tick_a!r}/{tick_b!r}")
+        out = {"R_ask": ks["a_ask"], "B_ask": ks["b_ask"], "R_bid": ks.get("a_bid"), "B_bid": ks.get("b_bid")}
+    elif _norm(red) == _norm(tick_b):
+        out = {"R_ask": ks["b_ask"], "B_ask": ks["a_ask"], "R_bid": ks.get("b_bid"), "B_bid": ks.get("a_bid")}
+    else:
+        raise ValueError(f"cannot orient Kalshi asks: {red!r} not in {tick_a!r}/{tick_b!r}")
+    try:
+        mr, mb = (out["R_ask"] + out["R_bid"]) / 2, (out["B_ask"] + out["B_bid"]) / 2
+        out["q_kalshi_mid"] = float(mr / (mr + mb))
+    except (TypeError, ZeroDivisionError):
+        out["q_kalshi_mid"] = None
+    return out
 
 
 def _valid_prob(x) -> bool:
@@ -263,7 +387,7 @@ def _prior_ufc_bouts(name: str, before: pd.Timestamp) -> int:
     return int((h.R_fighter.map(_norm).eq(n) | h.B_fighter.map(_norm).eq(n)).sum())
 
 
-def score_capture(path: Path, manifest: dict, models: list, max_lag_min: float) -> dict:
+def score_capture(path: Path, bundles: dict, max_lag_min: float) -> dict:
     """Score one archived v2 capture under the paper contract.
 
     Abstains (never scores) when: the capture is in the future or at/after the scheduled
@@ -273,8 +397,10 @@ def score_capture(path: Path, manifest: dict, models: list, max_lag_min: float) 
     """
     raw = path.read_bytes()
     cap = json.loads(raw)
+    manifest = bundles["F1"][0]
     rec = {"capture_file": path.name, "capture_sha256": hashlib.sha256(raw).hexdigest(),
-           "runner_sha256": _sha(Path(__file__)), "bundle_manifest_sha256": _sha(BUNDLE / "manifest.json"),
+           "runner_sha256": _sha(Path(__file__)),
+           "bundle_manifest_sha256": {n: _sha(CANDIDATES[n]["bundle"] / "manifest.json") for n in bundles},
            "bundle_fit_before": manifest["fit_before"], "paper_only": True, "executed": False}
     if not (np.isfinite(max_lag_min) and max_lag_min > 0):
         raise ValueError("max_lag_min must be finite and positive")
@@ -328,42 +454,91 @@ def score_capture(path: Path, manifest: dict, models: list, max_lag_min: float) 
     feats = props_features(parse_method_props(page).get(mu, {}), red_pos, q)
     row = row.assign(R_odds=r_odds, B_odds=b_odds, q=q, has_odds=True, **feats)
     row = row.drop(columns=[c for c in ["empty_arena"] if c in row])
-    fn = _model_fn()
-    preds = [fn.predict(m, manifest["flb_slope_a"], manifest["cat_features"], row)[0] for m in models]
-    p = float(np.mean(preds))
     asks = kalshi_asks_for(cap, red)
+    fn = _model_fn()
+    results = {}
+    for name, (man, models) in bundles.items():
+        r = row
+        info = {}
+        if CANDIDATES[name]["perf"]:
+            perf, pdiag = target_performance(row, card_date)
+            info["b_history"] = pdiag
+            lag_d = pdiag.get("source_history_lag_days")
+            if lag_d is None or lag_d > MAX_B_HISTORY_LAG_DAYS:
+                results[name] = {**info, "status": "abstain_stale_b_history"}
+                continue
+            r = pd.concat([row.reset_index(drop=True), perf.reset_index(drop=True)], axis=1)
+        preds = [fn.predict(m, man["flb_slope_a"], man["cat_features"], r)[0] for m in models]
+        p = float(np.mean(preds))
+        results[name] = {**info, "status": "scored", "p_red": p, "p_red_seed_std": float(np.std(preds)),
+                         **decide(p, q, asks)}
+    a = manifest["flb_slope_a"]
+    controls = {"q_book": q, "p_mf": float(1 / (1 + np.exp(-a * logit(q)))), "q_kalshi_mid": asks.get("q_kalshi_mid")}
     return {**rec, "status": "scored", "card_date": str(card_date.date()), "R_fighter": red, "B_fighter": blue,
-            "book": book, "R_odds": r_odds, "B_odds": b_odds, "q_book": q, **feats,
-            "p_red": p, "p_red_seed_std": float(np.std(preds)), **asks, **decide(p, q, asks)}
+            "book": book, "R_odds": r_odds, "B_odds": b_odds, **feats, **asks,
+            "controls": controls, "candidates": results}
+
+
+def pending_captures(captures: Path) -> list[Path]:
+    return [p for p in sorted(captures.glob("*.json")) if not (OUTDIR / f"{p.stem}.anchored.json").exists()]
 
 
 def score_dir(captures: Path, max_lag_min: float) -> list[dict]:
-    manifest, models = load_bundle()
+    todo = pending_captures(captures)
+    if not todo:
+        return []
+    bundles = load_bundles()
     OUTDIR.mkdir(parents=True, exist_ok=True)
     done = []
-    for path in sorted(captures.glob("*.json")):
-        out = OUTDIR / f"{path.stem}.anchored.json"
-        if out.exists():
-            continue
+    for path in todo:
         try:
-            rec = score_capture(path, manifest, models, max_lag_min)
+            rec = score_capture(path, bundles, max_lag_min)
         except Exception as exc:  # keep evidence of every failure, never retry silently with later prices
             rec = {"capture_file": path.name, "status": "error", "error": repr(exc)}
-        out.write_text(json.dumps(rec, indent=1, default=str))
+        (OUTDIR / f"{path.stem}.anchored.json").write_text(json.dumps(rec, indent=1, default=str))
         done.append(rec)
     return done
 
 
+def run(captures: Path, max_lag_min: float = 10.0) -> list[dict]:
+    """One launchd tick: refresh the UFCStats snapshot at most every 6 h, then score new captures."""
+    import fcntl
+
+    OUTDIR.mkdir(parents=True, exist_ok=True)
+    with open(OUTDIR / "run.lock", "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return []
+        if not pending_captures(captures):
+            try:
+                refresh_ufcstats()
+            except Exception as exc:
+                print(f"{dt.datetime.now(dt.UTC).isoformat()} refresh failed: {exc!r}", flush=True)
+            return []
+        return score_dir(captures, max_lag_min)
+
+
 def report() -> pd.DataFrame:
-    """All signal records. For would_bet rows, the per-card cap is applied AFTER the fact as a
-    descriptive scaling of hypothetical fractions -- it is not online sizing with reserved cash."""
-    recs = [json.loads(p.read_text()) for p in sorted(OUTDIR.glob("*.anchored.json"))]
-    d = pd.DataFrame(recs)
+    """One row per (capture, candidate). For would_bet rows, the per-card cap is applied AFTER the
+    fact as a descriptive scaling of hypothetical fractions -- it is not online sizing with reserved cash."""
+    rows = []
+    for p in sorted(OUTDIR.glob("*.anchored.json")):
+        r = json.loads(p.read_text())
+        base = {k: r.get(k) for k in ("capture_file", "status", "card_date", "R_fighter", "B_fighter", "captured_at_utc")}
+        base.update(r.get("controls") or {})
+        if not r.get("candidates"):
+            rows.append(base)
+            continue
+        for name, c in r["candidates"].items():
+            rows.append({**base, "candidate": name, "cand_status": c.get("status"), "p_red": c.get("p_red"),
+                         "signal": c.get("signal"), "raw_kelly_frac_unexecuted": c.get("raw_kelly_frac_unexecuted")})
+    d = pd.DataFrame(rows)
     if d.empty or "signal" not in d:
         return d
     d["kelly_frac_after_card_cap"] = 0.0
     wb = d.signal.eq("would_bet")
-    for _, g in d[wb].groupby("card_date"):
+    for _, g in d[wb].groupby(["candidate", "card_date"]):
         tot = g.raw_kelly_frac_unexecuted.sum()
         scale = min(1.0, POLICY["cap_per_card"] / tot) if tot > 0 else 0.0
         d.loc[g.index, "kelly_frac_after_card_cap"] = g.raw_kelly_frac_unexecuted * scale
@@ -374,21 +549,32 @@ def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     f = sub.add_parser("fit")
+    f.add_argument("--candidate", choices=list(CANDIDATES), required=True)
     f.add_argument("--before", required=True)
     f.add_argument("--seeds", type=int, default=10)
     s = sub.add_parser("score")
     s.add_argument("--captures", required=True, type=Path)
     s.add_argument("--max-lag-min", type=float, default=10.0)
+    r = sub.add_parser("run")
+    r.add_argument("--captures", required=True, type=Path)
+    r.add_argument("--max-lag-min", type=float, default=10.0)
+    rf = sub.add_parser("refresh-ufcstats")
+    rf.add_argument("--force", action="store_true")
     sub.add_parser("report")
     args = ap.parse_args()
+    stamp = dt.datetime.now(dt.UTC).isoformat()
     if args.cmd == "fit":
-        print(fit_bundle(args.before, args.seeds))
-    elif args.cmd == "score":
-        for r in score_dir(args.captures, args.max_lag_min):
-            print(r.get("capture_file"), r.get("status"), r.get("signal", ""))
+        print(fit_bundle(args.candidate, args.before, args.seeds))
+    elif args.cmd in ("score", "run"):
+        recs = score_dir(args.captures, args.max_lag_min) if args.cmd == "score" else run(args.captures, args.max_lag_min)
+        for rec in recs:
+            sig = {n: c.get("signal", c.get("status")) for n, c in (rec.get("candidates") or {}).items()}
+            print(stamp, rec.get("capture_file"), rec.get("status"), sig, flush=True)
+    elif args.cmd == "refresh-ufcstats":
+        print(json.dumps(refresh_ufcstats(force=args.force), indent=1))
     else:
         d = report()
-        print(d.status.value_counts() if not d.empty else "no records")
+        print(d.groupby(["candidate", "signal"]).size() if "signal" in d else d.status.value_counts() if not d.empty else "no records")
 
 
 if __name__ == "__main__":

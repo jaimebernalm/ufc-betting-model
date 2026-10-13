@@ -10,7 +10,8 @@ import pytest
 
 import ufc_pred.research.anchored_shadow as S
 
-pytestmark = pytest.mark.skipif(not (S.BUNDLE / "manifest.json").exists(), reason="needs the local shadow bundle")
+pytestmark = pytest.mark.skipif(not (S.CANDIDATES["F1"]["bundle"] / "manifest.json").exists(),
+                                reason="needs the local shadow bundles")
 
 NOW = pd.Timestamp(dt.datetime.now(dt.UTC))
 
@@ -33,7 +34,7 @@ def _capture(tmp_path: Path, captured, sched, card_date="2026-11-01", swap=False
 
 @pytest.fixture(scope="module")
 def bundle():
-    return S.load_bundle()
+    return S.load_bundles()
 
 
 @pytest.fixture
@@ -51,12 +52,17 @@ def offline(monkeypatch, tmp_path):
             + "</tbody></table>")
     monkeypatch.setattr(S, "find_bfo_event", lambda d, n: ("fake-event", page, rows, 1))
     monkeypatch.setattr(S, "_prior_ufc_bouts", lambda name, before: 3)
+    # B1/B2 for the synthetic target: all-missing columns with a fresh history (7 days)
+    def fake_perf(row, card_date):
+        cols = [f for f in S.load_bundle("F1B")[0]["feature_names"] if "perf" in f]
+        return (pd.DataFrame({c: [np.nan] for c in cols}),
+                {"source_history_lag_days": 7, "snapshot": "synthetic"})
+    monkeypatch.setattr(S, "target_performance", fake_perf)
     return rows
 
 
 def _score(path, bundle, lag=10.0):
-    manifest, models = bundle
-    return S.score_capture(path, manifest, models, lag)
+    return S.score_capture(path, bundle, lag)
 
 
 @pytest.mark.parametrize("captured,sched,status", [
@@ -91,13 +97,38 @@ def test_happy_path_and_orientation(tmp_path, bundle, offline):
     p = _capture(tmp_path, NOW - pd.Timedelta(minutes=1), NOW + pd.Timedelta(hours=1))
     r = _score(p, bundle)
     assert r["status"] == "scored" and r["executed"] is False
-    assert 0 < r["p_red"] < 1 and r["book"] == "DraftKings"
-    assert np.isfinite(r["mkt_props_dif"]) and r["R_ask"] == 0.40
+    assert r["book"] == "DraftKings" and np.isfinite(r["mkt_props_dif"]) and r["R_ask"] == 0.40
     assert {"capture_sha256", "runner_sha256", "bundle_manifest_sha256"} <= set(r)
+    for name in bundle:
+        c = r["candidates"][name]
+        assert c["status"] == "scored" and 0 < c["p_red"] < 1
+    assert 0 < r["controls"]["p_mf"] < 1 and 0 < r["controls"]["q_kalshi_mid"] < 1
     # swapped Kalshi order: ticker_a is the UFC fighter_b -> asks must follow the NAME
     p2 = _capture(tmp_path, NOW - pd.Timedelta(minutes=1), NOW + pd.Timedelta(hours=1), swap=True, name="c2.json")
     r2 = _score(p2, bundle)
     assert r2["R_ask"] == 0.62 and r2["B_ask"] == 0.40
+
+
+def test_stale_b_history_only_blocks_f1b(tmp_path, bundle, offline, monkeypatch):
+    if "F1B" not in bundle:
+        pytest.skip("F1B bundle not fitted")
+    monkeypatch.setattr(S, "target_performance", lambda row, d: (pd.DataFrame(index=[0]), {"source_history_lag_days": 40}))
+    r = _score(_capture(tmp_path, NOW - pd.Timedelta(minutes=1), NOW + pd.Timedelta(hours=1)), bundle)
+    assert r["candidates"]["F1B"]["status"] == "abstain_stale_b_history"
+    assert r["candidates"]["F1"]["status"] == "scored"
+
+
+def test_real_b_features_for_a_historical_target():
+    """The CURRENT snapshot reproduces the frozen B1/B2 row exactly for a known fight."""
+    if not S.SNAPSHOTS.exists():
+        pytest.skip("no UFCStats snapshot")
+    tf = pd.read_parquet(S.ROOT / "artifacts/shadow_candidate_2026_09_14_v2/training_features.parquet")
+    row = tf[tf.date == tf.date.max()].head(1).reset_index(drop=True)
+    perf, diag = S.target_performance(row, row.date.iloc[0])
+    frozen = pd.read_parquet(S.PERF_B1).merge(pd.read_parquet(S.PERF_B2), on=S.KEYS)
+    ref = frozen.merge(row[S.KEYS], on=S.KEYS).drop(columns=S.KEYS)
+    assert np.allclose(perf[ref.columns].to_numpy(float), ref.to_numpy(float), equal_nan=True)
+    assert diag["source_history_lag_days"] <= 14
 
 
 def test_decide_rejects_non_finite():
