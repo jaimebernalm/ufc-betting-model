@@ -37,8 +37,9 @@ def bundle():
 
 
 @pytest.fixture
-def offline(monkeypatch):
-    """No network: a fake BFO page/rows with one DraftKings pair and full method props."""
+def offline(monkeypatch, tmp_path):
+    """No network and no writes outside tmp: a fake BFO page/rows with one DraftKings pair and method props."""
+    monkeypatch.setattr(S, "OUTDIR", tmp_path / "shadow_out")
     rows = pd.DataFrame({
         "matchup_id": [1, 1], "fighter_name": ["Red Fighter", "Blue Fighter"], "fighter_pos": [1, 2],
         "book_name": ["DraftKings", "DraftKings"], "american_odds": [150.0, -170.0],
