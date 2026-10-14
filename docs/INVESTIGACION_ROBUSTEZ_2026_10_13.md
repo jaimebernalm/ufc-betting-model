@@ -19,6 +19,7 @@
 4. **Recomendación:**
    - No usar dinero real con ningún modelo; esto incluye el sistema actual, cuyo uso con dinero conviene parar. La decisión es tuya.
    - Si se quiere seguir, abrir un **estudio nuevo y exploratorio** de registro prospectivo en papel, con un protocolo propio. No es el cumplimiento de la puerta original, que F1 no superó. El logger de F1 ya existe (`ufc_pred.research.anchored_shadow`).
+   - **Actualización (13-10-2026):** por decisión del usuario, la candidata principal de la sombra es **F1+B1+B2**, con F1 como comparación. Ver «Decisión posterior» al final.
 
 ## 1. Qué estaba mal
 
@@ -198,6 +199,31 @@ Los IC son muy anchos. Lo único que se repite en todos los cortes es la direcci
   - **Bundle:** `artifacts/r2026_10/anchored_shadow_bundle_v1/`, con todo lo anterior al 2026-10-13. Nunca se sobrescribe; al cargarlo se verifican modelos, datos de ajuste, política y código del modelo. El v0 se conserva solo como trazabilidad.
   - **Tests:** las puertas tienen tests sintéticos aislados en un directorio temporal (`tests/research/test_anchored_shadow_gates.py`).
   - **No está conectado a launchd.**
+
+## Decisión posterior: F1+B1+B2 como candidata principal (decisión del usuario, 13-10-2026)
+
+En la sombra en papel, **F1+B1+B2 es la candidata principal y F1 queda como comparación**. El logger registra las dos igual que antes. Los bundles y el código no cambian: el código se verifica por hash al cargar los bundles, así que esta designación vive aquí y no en el código.
+
+**Motivo:** F1+B1+B2 va por delante de F1 en el total de cada periodo, incluido el de desarrollo. No es un caso de elegir al ganador del test después de perder en validación. Diferencia emparejada de log-loss, F1+B1+B2 − F1 (negativo = mejor F1+B1+B2), con IC95 por bootstrap de carteleras:
+
+| Periodo | Peleas | Diferencia | IC95 |
+|---|---|---|---|
+| Desarrollo 2016-2023 | 3.735 | −0,0004 | −0,0021 a +0,0013 |
+| Confirmación 2024-2026 | 1.367 | −0,0017 | −0,0040 a +0,0006 |
+| Kalshi en vivo, jun-oct 2026 | 89 | −0,0061 | −0,0131 a +0,0012 |
+| Todo 2016-2026 | 5.102 | −0,0007 | −0,0022 a +0,0007 |
+
+Frente al precio de mercado, F1+B1+B2 sí pasa la puerta G1 en 2024-2026 (−0,0060, IC −0,0110 a −0,0007), cosa que F1 no consiguió. También conserva más de la ventaja que predice en las apuestas que haría con EV > 2 %: el 67 %, frente al 23 % de F1.
+
+**Límites:**
+- No fue el finalista congelado. La regla emparejada de desarrollo exigía mejorar a F1 con claridad y no lo hizo (−0,0008, IC −0,0028 a +0,0011). La designación se toma después de la mirada única a 2024-2026.
+- Ninguna diferencia frente a F1 es significativa por sí sola. Año a año gana en 6 de 11.
+- No cambia la recomendación de no usar dinero real. Su ROI plano en 2024-2026 fue +3,5 %, con un IC de −4 % a +11 %.
+- En la revisión prospectiva, la métrica primaria pasa a ser F1+B1+B2 frente al precio contemporáneo. F1+B1+B2 frente a F1 queda como comparación secundaria.
+
+**Análisis añadidos el mismo día (descriptivos):**
+- **Kalshi en vivo para F1+B1+B2.** Script `claude_venue_eval_f1b.py`, mismo entrenamiento anterior a 2026 que F1, que se reproduce con diferencia 0.
+- **Estudio de tamaño de apuesta.** Script `claude_sizing_opt.py`: 2.940 combinaciones, selección walk-forward con 2016-2023 y una restricción de caídas estimada remuestreando carteleras. Resultado: Kelly completo o sin topes tiene caídas del 71-85 % en 2024-2026, y 2× Kelly lleva a la ruina. La política elegida con 2016-2023 para F1+B1+B2 es ¼ Kelly con topes del 25 % por pelea y 30 % por cartelera, EV > 3 % y sin techo; en 2024-2026 da 181 $ desde 100 $, con una caída máxima del 30 %. Con F1, la misma regla elige otra política que pierde un 39 %, así que la optimización es inestable entre modelos. Se propone registrarla en la sombra junto a la política actual, no adoptarla.
 
 ## Pendiente: activar la sombra (aplazado por decisión del usuario, 13-10-2026)
 
