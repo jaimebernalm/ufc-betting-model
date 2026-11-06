@@ -163,14 +163,23 @@ tests/            103 tests (4 require the optional local dataset)
 
 ## Deployment
 
-The active candidate uses an isolated **shadow-only** launchd watchdog every
-60 seconds, preserving the existing fight-capture timing. It records model
-inputs, probabilities, source hashes, books and paper balances without sending
-bet alerts or placing orders. Kelly fractions, sharpening and the training
-cutoff remain frozen. Review requires both 12 completed cards and 150 resolved
-eligible fights; future profitability has not been established.
+Two **paper-only** launchd jobs run every 60 seconds; neither sends bet alerts
+nor places orders.
 
-The configured bundle is `artifacts/shadow_candidate_2026_09_14_v2/`. Model
+- **Capture watchdog** (`ufc_pred.cli.shadow_runner`): at T-60 of each fight's
+  scheduled start it archives the Kalshi order book, the v2 feature row and
+  source hashes. It still records v2's own recommendation, but v2 is retired as
+  a decision model. The capture runtime is frozen by hash, so any code change
+  ships as a new version ([capture v2.1](docs/CAPTURA_V2_1_2026_11_05.md)).
+- **Anchored-shadow logger** (`python -m ufc_pred.research.anchored_shadow run`):
+  scores each new capture for F1+B1+B2 and F1 against a sportsbook price fetched
+  from BestFightOdds within 10 minutes of the Kalshi snapshot, and logs every
+  signal and every abstention with its reason.
+
+Review requires 12 completed cards and 150 eligible fights, or 2027-03-31,
+whichever comes first; future profitability has not been established.
+
+The configured bundle is `artifacts/shadow_capture_2026_11_05_v2_1/`. Model
 binaries, datasets, archived web responses, runtime manifests and personal
 ledgers are intentionally excluded from Git. A fresh clone can run unit tests,
 but running shadow inference or reproducing the historical comparisons also

@@ -75,7 +75,8 @@ FIT_DATA = [
     ROOT / "artifacts/r2026_10/claude/bfo/bfo_matched.parquet",
     MKT_EXTRA,
 ]
-# read-only: the live shadow runner's history, used only to recognise debutants
+# read-only: the capture runner's history, used only to recognise debutants.
+# score_dir() points it at <shadow dir>/history.parquet next to the captures it reads.
 LIVE_HISTORY = ROOT / "data/processed/shadow_candidate_2026_09_14_v2/history.parquet"
 POLICY = dict(
     ev_thr=0.02, kelly_frac=0.25, cap_per_fight=0.02, cap_per_card=0.15, edge_ceiling=0.10, fee_coeff=0.07
@@ -324,15 +325,27 @@ def find_bfo_event(card_date: pd.Timestamp, names: tuple[str, str]):
         if abs((lm - card_date).days) <= 10:
             cands.append(e)
     want = {_norm(names[0]), _norm(names[1])}
+    surnames = {_norm(n).split()[-1]: n for n in names}
     for e in sorted(cands, key=lambda e: e["lastmod"], reverse=True):
         page = bfo.fetch(e["url"], refresh=True)
         parsed = bfo.parse_event(page)
         rows = pd.DataFrame(parsed["rows"])
         if rows.empty:
             continue
+        by_surname = []
         for mu, g in rows.groupby("matchup_id"):
-            if {_norm(n) for n in g.fighter_name.unique()} == want:
+            have = {_norm(n) for n in g.fighter_name.unique()}
+            if have == want:
                 return e["slug"], page, g, int(mu)
+            if len(surnames) == 2 and {n.split()[-1] for n in have} == set(surnames):
+                by_surname.append((mu, g))
+        # BFO spells some names differently from UFCStats ("Alex" / "Alexander"):
+        # accept a unique matchup with both surnames on the event, and relabel it
+        # with the feature row's names so every later lookup stays exact.
+        if len(by_surname) == 1:
+            mu, g = by_surname[0]
+            g = g.assign(fighter_name=g.fighter_name.map(lambda n: surnames[_norm(n).split()[-1]]))
+            return e["slug"], page, g, int(mu)
     return None, None, None, None
 
 
@@ -372,9 +385,18 @@ def kalshi_asks_for(cap: dict, red: str) -> dict:
     swap = bool(fight.get("kalshi_swap_vs_ufc"))
     tick_a = fight["fighter_b_ufc"] if swap else fight["fighter_a_ufc"]
     tick_b = fight["fighter_a_ufc"] if swap else fight["fighter_b_ufc"]
-    if _norm(red) == _norm(tick_a):
+    # The UFC.com names in `fight` can differ from the resolved UFCStats names in
+    # the feature row ("Zachary" / "Zach Reese"); then orient through Blue.
+    blue = ((cap.get("features") or {}).get("forward") or [{}])[0].get("B_fighter")
+
+    def same(x, y):
+        return bool(x) and bool(y) and _norm(x) == _norm(y)
+
+    red_is_a = same(red, tick_a) or (not same(red, tick_b) and same(blue, tick_b))
+    red_is_b = same(red, tick_b) or (not same(red, tick_a) and same(blue, tick_a))
+    if red_is_a and not red_is_b:
         out = {"R_ask": ks["a_ask"], "B_ask": ks["b_ask"], "R_bid": ks.get("a_bid"), "B_bid": ks.get("b_bid")}
-    elif _norm(red) == _norm(tick_b):
+    elif red_is_b and not red_is_a:
         out = {"R_ask": ks["b_ask"], "B_ask": ks["a_ask"], "R_bid": ks.get("b_bid"), "B_bid": ks.get("a_bid")}
     else:
         raise ValueError(f"cannot orient Kalshi asks: {red!r} not in {tick_a!r}/{tick_b!r}")
@@ -550,6 +572,8 @@ def pending_captures(captures: Path) -> list[Path]:
 
 
 def score_dir(captures: Path, max_lag_min: float) -> list[dict]:
+    global LIVE_HISTORY
+    LIVE_HISTORY = captures.resolve().parent / "history.parquet"
     todo = pending_captures(captures)
     if not todo:
         return []

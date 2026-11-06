@@ -11,6 +11,11 @@ Capture triggers (watchdog mode), per fight, evaluated each tick:
                    immediately: bankrolls were synced at tick start, so Kelly
                    sizes off a bankroll that includes every officially-resolved
                    fight (worst case the just-ended fight books ~6 min later).
+  scheduled_lead : shadow mode only (CAPTURE_ALL_AT_LEAD) — every fight, not
+                   just the opener, fires at T-60min of its scheduled start, so
+                   each capture precedes the real start. The paper logger that
+                   reads these captures abstains on any capture at or after the
+                   scheduled start, and prev_resolved often fires later.
   fallback_time  : the previous fight still isn't resolved by T-25min before
                    this fight's scheduled start (long fight / schedule drift)
                    — capture anyway so the bet isn't missed. Tagged [LATE].
@@ -100,6 +105,7 @@ EARLIEST_CAPTURE_MIN = 90  # never capture earlier than T-90min (nb09 price qual
 FIRST_FIGHT_CAPTURE_MIN = 60  # card opener fires at T-60 (no prior fight to wait for)
 FALLBACK_BEFORE_START_MIN = 25  # capture by T-25min even if prev fight unresolved
 STALE_AFTER_START_MIN = 15  # past scheduled start + this -> too late, skip
+CAPTURE_ALL_AT_LEAD = False  # shadow_runner sets True: every fight fires at T-60 (scheduled_lead)
 # Restored to 14 days after verified backfill on 2026-09-14.
 MAX_HISTORY_AGE_DAYS = 14  # refuse to bet if fights.parquet is older than this
 
@@ -216,6 +222,38 @@ def match_kalshi(
     if len(candidates) == 1:
         return candidates[0]
     return None
+
+
+def with_resolvable_names(
+    kalshi: CardFight, fight: FightSchedule, swap: bool, fights: pd.DataFrame
+) -> CardFight:
+    """Fall back to UFC.com's spelling for a corner whose Kalshi name does not resolve.
+
+    Kalshi often writes a name differently from UFCStats ("Alex Volkanovski",
+    "Jung-Young Lee", "Cameron Rowston"), while the official UFC.com card uses
+    the UFCStats spelling. Each corner keeps its Kalshi name when it resolves;
+    otherwise the UFC.com name of the same corner goes through the same strict
+    resolver. A debutant still fails, as it must.
+    """
+    from dataclasses import replace
+
+    from ufc_pred.inference.upcoming_builder import resolve_fighter_name
+
+    ufc_a, ufc_b = (fight.fighter_b, fight.fighter_a) if swap else (fight.fighter_a, fight.fighter_b)
+    names = {}
+    for field, kalshi_name, ufc_name in (
+        ("fighter_a", kalshi.fighter_a, ufc_a),
+        ("fighter_b", kalshi.fighter_b, ufc_b),
+    ):
+        try:
+            resolve_fighter_name(kalshi_name, fights, fight.weight_class)
+        except ValueError:
+            try:
+                resolve_fighter_name(ufc_name, fights, fight.weight_class)
+                names[field] = ufc_name
+            except ValueError:
+                pass
+    return replace(kalshi, **names) if names else kalshi
 
 
 def make_fight_key(date: pd.Timestamp, fight: FightSchedule) -> str:
@@ -427,6 +465,7 @@ def process_one(
         return {"key": key, "result": "no_market"}
 
     kalshi, swap = matched
+    kalshi = with_resolvable_names(kalshi, fight, swap, fights_df)
     if verbose:
         local = fight.start_time_utc.tz_convert("US/Eastern")
         print(
@@ -632,6 +671,11 @@ def fight_trigger(
     # wins and a stale schedule can never preempt it.
     if prev_resolution(ordered[i - 1]) is not None:
         return "prev_resolved"
+    # Shadow capture: fire on the scheduled clock like the opener, so the
+    # snapshot is taken before the real start rather than once the prior
+    # fight has settled.
+    if CAPTURE_ALL_AT_LEAD and now >= start - pd.Timedelta(minutes=FIRST_FIGHT_CAPTURE_MIN):
+        return "scheduled_lead"
     # Prior fight unresolved. If its Kalshi market is still openly trading, the
     # card simply hasn't reached this fight yet (e.g. weather delay) — do NOT
     # fire a blind, frozen-bankroll bet off the scheduled clock; keep waiting.
@@ -804,6 +848,7 @@ def run(args: argparse.Namespace) -> int:
     #                   stable >= 90s) -> fire NOW with a lag-0 bankroll
     #   fallback_time : previous fight unresolved but we're at T-25min ->
     #                   fire anyway so the bet isn't missed (tagged [LATE])
+    #   scheduled_lead: shadow mode only -> every fight fires at T-60min
     # Idempotency makes firing once-only; `--once` bypasses all gating.
     eligible: list[tuple[FightSchedule, bool, str]] = []  # (fight, is_late, trigger)
     if args.once:

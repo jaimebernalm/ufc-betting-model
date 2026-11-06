@@ -337,6 +337,7 @@ def test_shadow_wrapper_routes_all_outputs_and_disables_alerts(monkeypatch, tmp_
         "notify",
         "write_audit_log",
         "write_record",
+        "CAPTURE_ALL_AT_LEAD",
     ]:
         monkeypatch.setattr(r, attr, getattr(r, attr))
     from ufc_pred.ingest import kalshi_client
@@ -346,6 +347,7 @@ def test_shadow_wrapper_routes_all_outputs_and_disables_alerts(monkeypatch, tmp_
     def run(args):
         assert args.shadow and args.dry_run and args.watchdog and not args.once
         assert args.models_dir == bundle / "models"
+        assert r.CAPTURE_ALL_AT_LEAD is True
         assert r.KalshiClient().get_balance()["balance_dollars"] == "300.0"
         assert r.notify("must not send") is None
         assert r.write_audit_log(pd.Timestamp("2026-09-15"), {}, []).exists()
