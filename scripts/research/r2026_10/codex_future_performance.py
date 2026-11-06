@@ -97,7 +97,10 @@ def main() -> None:
     targets = read_targets(args.targets)
     observations, exclusions = load_bouts(args.source_dir)
     frame, diagnostics = build_future_performance(
-        observations, targets, args.as_of, include_adjusted=not args.b1_only,
+        observations,
+        targets,
+        args.as_of,
+        include_adjusted=not args.b1_only,
     )
     expected = [*KEY_COLUMNS, *B1_COLUMNS, *([] if args.b1_only else B2_COLUMNS)]
     if list(frame.columns) != expected:
@@ -130,9 +133,13 @@ def main() -> None:
         "include_adjusted": not args.b1_only,
         "source_hashes": sources,
         "code_hashes": code,
-        "runtime": {"python": sys.version, "numpy": np.__version__, "pandas": pd.__version__,
-                    "sklearn": sklearn.__version__},
-        "feature_columns": expected[len(KEY_COLUMNS):],
+        "runtime": {
+            "python": sys.version,
+            "numpy": np.__version__,
+            "pandas": pd.__version__,
+            "sklearn": sklearn.__version__,
+        },
+        "feature_columns": expected[len(KEY_COLUMNS) :],
         "diagnostics": diagnostics,
         "source_exclusions_by_reason": exclusions.reason.value_counts().to_dict(),
         "artifacts": {p.name: sha256(p) for p in (feature_path, exclusion_path, target_path)},
@@ -145,8 +152,16 @@ def main() -> None:
     # Written last: consumers must require this completed manifest before use.
     manifest_path = destination / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, default=str) + "\n")
-    print(json.dumps({"features": str(feature_path), "manifest": str(manifest_path),
-                      "rows": len(frame), "features_count": len(expected) - len(KEY_COLUMNS)}))
+    print(
+        json.dumps(
+            {
+                "features": str(feature_path),
+                "manifest": str(manifest_path),
+                "rows": len(frame),
+                "features_count": len(expected) - len(KEY_COLUMNS),
+            }
+        )
+    )
 
 
 if __name__ == "__main__":

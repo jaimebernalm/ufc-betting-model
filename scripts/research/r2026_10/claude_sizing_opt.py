@@ -27,8 +27,13 @@ from ufc_pred.paths import ROOT
 from ufc_pred.research.harness import KEYS, OUT, american_to_decimal, card_bootstrap_mean, load_base
 
 MODELS = {"F1": "p_R6_mkt", "F1B": "p_R6_mkt_B1v2B2"}
-GRID = dict(thr=[0.0, 0.01, 0.02, 0.03, 0.05, 0.075, 0.10], k=[0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0],
-            capf=[0.02, 0.05, 0.10, 0.25, 1.0], capc=[0.15, 0.30, 0.50, 1.0], ceil=[0.05, 0.10, 1.0])
+GRID = dict(
+    thr=[0.0, 0.01, 0.02, 0.03, 0.05, 0.075, 0.10],
+    k=[0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0],
+    capf=[0.02, 0.05, 0.10, 0.25, 1.0],
+    capc=[0.15, 0.30, 0.50, 1.0],
+    ceil=[0.05, 0.10, 1.0],
+)
 FIXED = {
     "recomendada (1/4K, 2%/15%)": (0.02, 0.25, 0.02, 0.15, 0.10),
     "1/2K sin topes": (0.02, 0.5, 1.0, 1.0, 0.10),
@@ -59,8 +64,16 @@ def bets_kalshi(df: pd.DataFrame, pcol: str) -> pd.DataFrame:
 def _pack(df, red, pp, d, mkt):
     win = np.where(red, df.y == 1, df.y == 0)
     ev = pp * d - 1
-    out = pd.DataFrame({"date": df.date.to_numpy(), "card": df.card.to_numpy(), "ev": ev,
-                        "kf": np.maximum(0, ev / (d - 1)), "edge": pp - mkt, "r": np.where(win, d - 1, -1.0)})
+    out = pd.DataFrame(
+        {
+            "date": df.date.to_numpy(),
+            "card": df.card.to_numpy(),
+            "ev": ev,
+            "kf": np.maximum(0, ev / (d - 1)),
+            "edge": pp - mkt,
+            "r": np.where(win, d - 1, -1.0),
+        }
+    )
     return out[np.isfinite(out.ev)].sort_values("date").reset_index(drop=True)
 
 
@@ -87,8 +100,12 @@ class Evaluator:
         path = np.cumsum(lg[self.idx], axis=1)
         runmax = np.maximum.accumulate(np.concatenate([np.zeros((B, 1)), path], axis=1), axis=1)[:, 1:]
         dd = np.max(runmax - path, axis=1)
-        return dict(p_dd50=float(np.mean(dd >= np.log(2))), p_ruin90=float(np.mean(path.min(1) <= np.log(0.1))),
-                    p10_logw=float(np.quantile(path[:, -1], 0.10)), med_logw=float(np.median(path[:, -1])))
+        return dict(
+            p_dd50=float(np.mean(dd >= np.log(2))),
+            p_ruin90=float(np.mean(path.min(1) <= np.log(0.1))),
+            p10_logw=float(np.quantile(path[:, -1], 0.10)),
+            med_logw=float(np.median(path[:, -1])),
+        )
 
 
 def search(ev: Evaluator) -> pd.DataFrame:
@@ -96,7 +113,11 @@ def search(ev: Evaluator) -> pd.DataFrame:
     for pol in itertools.product(*GRID.values()):
         lg, n = ev.log_growth(*pol)
         r = dict(zip(GRID, pol), bets=n, g=float(np.mean(lg)) if np.isfinite(lg).all() else -np.inf)
-        r.update(ev.risk(lg) if np.isfinite(r["g"]) else dict(p_dd50=1.0, p_ruin90=1.0, p10_logw=-np.inf, med_logw=-np.inf))
+        r.update(
+            ev.risk(lg)
+            if np.isfinite(r["g"])
+            else dict(p_dd50=1.0, p_ruin90=1.0, p10_logw=-np.inf, med_logw=-np.inf)
+        )
         rows.append(r)
     return pd.DataFrame(rows)
 
@@ -113,8 +134,13 @@ def score(b: pd.DataFrame, pol) -> dict:
     lg, n = ev.log_growth(*pol)
     w = np.exp(np.cumsum(lg))
     peak = np.maximum.accumulate(np.concatenate([[1.0], w]))[1:]
-    return dict(bets=n, cards=ev.C, final=float(w[-1]) if len(w) else 1.0,
-                max_dd=float(np.max(1 - w / peak)) if len(w) else 0.0, **ev.risk(lg))
+    return dict(
+        bets=n,
+        cards=ev.C,
+        final=float(w[-1]) if len(w) else 1.0,
+        max_dd=float(np.max(1 - w / peak)) if len(w) else 0.0,
+        **ev.risk(lg),
+    )
 
 
 def fmt(pol) -> str:
@@ -124,9 +150,13 @@ def fmt(pol) -> str:
 
 def load_books() -> pd.DataFrame:
     base = load_base()
-    dev = base[base.year.between(2016, 2023) & base.q.notna()][KEYS + ["card", "year", "y", "q", "R_odds", "B_odds", "debut"]]
+    dev = base[base.year.between(2016, 2023) & base.q.notna()][
+        KEYS + ["card", "year", "y", "q", "R_odds", "B_odds", "debut"]
+    ]
     for m in MODELS.values():
-        dev = dev.merge(pd.read_parquet(OUT / f"claude/oof_dev_{m[2:]}.parquet")[KEYS + [m]], on=KEYS, how="left")
+        dev = dev.merge(
+            pd.read_parquet(OUT / f"claude/oof_dev_{m[2:]}.parquet")[KEYS + [m]], on=KEYS, how="left"
+        )
     conf = pd.read_parquet(OUT / "claude/holdout_eval.parquet")[dev.columns]
     d = pd.concat([dev, conf], ignore_index=True)
     return d[~d.debut.astype(bool) & d.R_odds.notna() & d.B_odds.notna()]
@@ -135,10 +165,19 @@ def load_books() -> pd.DataFrame:
 def load_kalshi() -> pd.DataFrame:
     opp = pd.read_parquet(OUT / "opportunities_kalshi.parquet")
     k = opp[KEYS + ["card", "y", "R_ask", "B_ask", "q_kalshi_mid"]].merge(
-        pd.read_parquet(OUT / "claude/venue_kalshi_f1b_q_kalshi_mid.parquet")[KEYS + ["p_F1_R6_mkt", "p_F1B"]], on=KEYS)
+        pd.read_parquet(OUT / "claude/venue_kalshi_f1b_q_kalshi_mid.parquet")[
+            KEYS + ["p_F1_R6_mkt", "p_F1B"]
+        ],
+        on=KEYS,
+    )
     k = k.rename(columns={"p_F1_R6_mkt": MODELS["F1"], "p_F1B": MODELS["F1B"]})
-    hist = pd.concat([pd.read_parquet("artifacts/shadow_candidate_2026_09_14_v2/verified_history.parquet")[KEYS],
-                      pd.read_parquet(LIVE_HISTORY)[KEYS], k[KEYS]]).drop_duplicates()
+    hist = pd.concat(
+        [
+            pd.read_parquet("artifacts/shadow_candidate_2026_09_14_v2/verified_history.parquet")[KEYS],
+            pd.read_parquet(LIVE_HISTORY)[KEYS],
+            k[KEYS],
+        ]
+    ).drop_duplicates()
     hist = add_prior_fight_counts(hist).drop_duplicates(subset=KEYS)
     k = k.merge(hist[KEYS + ["has_debut"]], on=KEYS, how="left")
     return k[(k.has_debut == False) & k.R_ask.notna() & k.B_ask.notna()]  # noqa: E712
@@ -148,8 +187,14 @@ def realisation(b: pd.DataFrame, thr=0.02, ceil=0.10) -> dict:
     """Realised flat ROI over predicted EV on the bets the policy takes: ~ the Kelly multiplier the data supports."""
     t = b[(b.ev > thr) & (b.edge <= ceil)]
     lo, hi = card_bootstrap_mean(t.r.to_numpy(), t.card.to_numpy())
-    return dict(bets=len(t), ev_pred=float(t.ev.mean()), roi=float(t.r.mean()), roi_lo=lo, roi_hi=hi,
-                ratio=float(t.r.mean() / t.ev.mean()))
+    return dict(
+        bets=len(t),
+        ev_pred=float(t.ev.mean()),
+        roi=float(t.r.mean()),
+        roi_lo=lo,
+        roi_hi=hi,
+        ratio=float(t.r.mean() / t.ev.mean()),
+    )
 
 
 def main():
@@ -161,7 +206,11 @@ def main():
         bb["year"] = pd.to_datetime(bb.date).dt.year
         bk = bets_kalshi(kal.dropna(subset=[pcol]), pcol)
         print(f"\n===== {name} =====")
-        for per, sub in [("2016-2023", bb[bb.year <= 2023]), ("2024-2026", bb[bb.year >= 2024]), ("Kalshi", bk)]:
+        for per, sub in [
+            ("2016-2023", bb[bb.year <= 2023]),
+            ("2024-2026", bb[bb.year >= 2024]),
+            ("Kalshi", bk),
+        ]:
             print(f"edge realisation {per}: {realisation(sub)}")
         # walk-forward: choose on 2016..Y-1, score on Y
         wf = {rule: [] for rule in ["growth", "robust"]}
@@ -177,19 +226,41 @@ def main():
                 fixed[f].append(np.log(score(test, pol)["final"]))
         print("walk-forward 2019-2023, $100 compounded across the five test years:")
         for lbl, v in list(wf.items()) + list(fixed.items()):
-            print(f"  {lbl:28s} {100 * np.exp(np.sum(v)):10.2f} $   per year: {[round(100 * np.exp(x), 1) for x in v]}")
+            print(
+                f"  {lbl:28s} {100 * np.exp(np.sum(v)):10.2f} $   per year: {[round(100 * np.exp(x), 1) for x in v]}"
+            )
         res = search(Evaluator(bb[bb.year <= 2023]))
         res.to_csv(OUT / f"claude/sizing_opt_grid_{name}.csv", index=False)
         pick = choose(res)
         for rule, pol in list(pick.items()) + list(FIXED.items()):
-            for per, sub in [("dev 2016-2023", bb[bb.year <= 2023]), ("conf 2024-2026", bb[bb.year >= 2024]), ("Kalshi jun-oct 2026", bk)]:
+            for per, sub in [
+                ("dev 2016-2023", bb[bb.year <= 2023]),
+                ("conf 2024-2026", bb[bb.year >= 2024]),
+                ("Kalshi jun-oct 2026", bk),
+            ]:
                 out.append(dict(model=name, stage=per, policy=rule, rule=fmt(pol), **score(sub, pol)))
     res = pd.DataFrame(out)
     res.to_csv(OUT / "claude/sizing_opt.csv", index=False)
     show = res[~res.stage.str.startswith("wf")].copy()
     show["final_$100"] = (100 * show.final).round(2)
-    print(show[["model", "stage", "policy", "rule", "bets", "final_$100", "max_dd", "p_dd50", "p_ruin90", "p10_logw"]]
-          .round(3).to_string(index=False))
+    print(
+        show[
+            [
+                "model",
+                "stage",
+                "policy",
+                "rule",
+                "bets",
+                "final_$100",
+                "max_dd",
+                "p_dd50",
+                "p_ruin90",
+                "p10_logw",
+            ]
+        ]
+        .round(3)
+        .to_string(index=False)
+    )
 
 
 if __name__ == "__main__":

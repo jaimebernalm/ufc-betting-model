@@ -30,7 +30,13 @@ def main():
         oof.to_parquet(OUT / f"claude/sens_R3_{tag}.parquet", index=False)
         r = delta_ll(oof.dropna(subset=["q"]), "p_R3_" + tag)
         eco = oof[~oof.debut & oof.q.notna()]
-        r.update({k: v for k, v in roi_summary(eco, "p_R3_" + tag, 0.02).items() if k in ("bets", "roi", "roi_lo", "roi_hi", "pnl_per_opp")})
+        r.update(
+            {
+                k: v
+                for k, v in roi_summary(eco, "p_R3_" + tag, 0.02).items()
+                if k in ("bets", "roi", "roi_lo", "roi_hi", "pnl_per_opp")
+            }
+        )
         rows.append(r)
         print(pd.DataFrame([r]).round(4).to_string(index=False), flush=True)
     pd.DataFrame(rows).to_csv(OUT / "claude/r3_sensitivity.csv", index=False)

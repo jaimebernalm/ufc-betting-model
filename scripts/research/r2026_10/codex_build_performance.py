@@ -85,7 +85,10 @@ def validate_features(frame: pd.DataFrame, targets: pd.DataFrame, expected: tupl
         raise ValueError("Feature schema differs from the frozen recipe")
     if not features or not np.isfinite(frame[features].to_numpy(dtype=float)).all():
         raise ValueError("Feature matrix must be nonempty and finite")
-    if any(not (c.startswith(("R_perf_", "B_perf_")) or c.startswith("perf_") and c.endswith("_dif")) for c in features):
+    if any(
+        not (c.startswith(("R_perf_", "B_perf_")) or c.startswith("perf_") and c.endswith("_dif"))
+        for c in features
+    ):
         raise ValueError("Unexpected feature column; metadata must stay out of the model matrix")
     return {
         "rows": len(frame),
@@ -100,7 +103,9 @@ def validate_features(frame: pd.DataFrame, targets: pd.DataFrame, expected: tupl
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("b1", "b2", "both", "benchmark-b2"), default="b1")
-    parser.add_argument("--overwrite", action="store_true", help="Preserve old artifacts by content hash before replacing")
+    parser.add_argument(
+        "--overwrite", action="store_true", help="Preserve old artifacts by content hash before replacing"
+    )
     args = parser.parse_args()
     if ROOT.name != "ufc-pred-research":
         raise RuntimeError("This research builder must run against the isolated research checkout")
@@ -114,7 +119,10 @@ def main() -> None:
     # Labels, odds, and existing model predictions are deliberately not loaded.
     targets = pd.read_parquet(TARGET, columns=[*KEY_COLUMNS, "weight_class"])
     observations, exclusions = load_bouts(SOURCE)
-    print(f"Parsed {observations.bout_id.nunique()} bouts / {len(observations)} fighter observations; {len(exclusions)} exclusions", flush=True)
+    print(
+        f"Parsed {observations.bout_id.nunique()} bouts / {len(observations)} fighter observations; {len(exclusions)} exclusions",
+        flush=True,
+    )
     hashes = source_hashes()
     recipe = PerformanceRecipe()
     manifest = {
@@ -146,7 +154,12 @@ def main() -> None:
         output = OUTPUT / "perf_features.parquet"
         save_parquet(frame, output, args.overwrite)
         info["sha256"] = sha256(output)
-        info["missing_by_year"] = frame.assign(year=frame.date.dt.year).groupby("year")[["R_perf_missing", "B_perf_missing"]].sum().to_dict()
+        info["missing_by_year"] = (
+            frame.assign(year=frame.date.dt.year)
+            .groupby("year")[["R_perf_missing", "B_perf_missing"]]
+            .sum()
+            .to_dict()
+        )
         manifest["artifacts"][output.name] = info
         save_parquet(exclusions, OUTPUT / "perf_exclusions.parquet", args.overwrite)
         print(f"B1 ready: {len(frame)} rows, {len(FEATURE_COLUMNS)} numeric features", flush=True)
@@ -159,7 +172,13 @@ def main() -> None:
                 cutoff = pd.Timestamp(month)
                 tick = time.monotonic()
                 state = fit_adjusted_state(observations[observations.date < cutoff], cutoff)
-                diagnostics.append({"month": month, "wall_seconds": time.monotonic() - tick, "diagnostics": state.diagnostics})
+                diagnostics.append(
+                    {
+                        "month": month,
+                        "wall_seconds": time.monotonic() - tick,
+                        "diagnostics": state.diagnostics,
+                    }
+                )
                 print(f"B2 benchmark {month}: {diagnostics[-1]['wall_seconds']:.2f}s", flush=True)
             manifest["benchmark"] = diagnostics
         else:
@@ -170,7 +189,10 @@ def main() -> None:
             info["sha256"] = sha256(output)
             manifest["artifacts"][output.name] = info
             save_parquet(diagnostics, OUTPUT / "perf_adjusted_fits.parquet", args.overwrite)
-            print(f"B2 ready: {len(frame)} rows, {len(frame.columns) - len(KEY_COLUMNS)} numeric features", flush=True)
+            print(
+                f"B2 ready: {len(frame)} rows, {len(frame.columns) - len(KEY_COLUMNS)} numeric features",
+                flush=True,
+            )
     manifest["wall_seconds"] = time.monotonic() - start
     manifest_path = OUTPUT / f"perf_{args.mode}_manifest.json"
     prepare_destination(manifest_path, args.overwrite)

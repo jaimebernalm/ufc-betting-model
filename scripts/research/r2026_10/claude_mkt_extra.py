@@ -7,7 +7,6 @@ Both are closing prices, same timestamp class as q.
 """
 
 import numpy as np
-import pandas as pd
 
 from ufc_pred.research.harness import KEYS, OUT, american_to_prob, load_base, logit
 

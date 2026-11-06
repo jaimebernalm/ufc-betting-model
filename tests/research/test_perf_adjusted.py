@@ -14,26 +14,44 @@ from ufc_pred.research import perf_adjusted as adjusted
 
 def observations():
     rows = []
-    for i, (date, a, b, division, minutes, sig_a, sig_b, td_a, td_b) in enumerate([
-        ("2015-01-02", "A", "B", "Lightweight", 10.0, 45, 15, 3, 1),
-        ("2015-03-12", "A", "C", "Lightweight", 15.0, 60, 22, 2, 0),
-        ("2015-05-03", "B", "C", "Lightweight", 12.0, 28, 31, 1, 2),
-        ("2015-08-04", "D", "E", "Heavyweight", 8.0, 12, 9, 1, 1),
-        ("2016-01-02", "A", "B", "Lightweight", 10.0, 400, 1, 9, 0),
-        ("2016-02-01", "Future", "A", "Futureweight", 10.0, 500, 2, 8, 0),
-    ]):
+    for i, (date, a, b, division, minutes, sig_a, sig_b, td_a, td_b) in enumerate(
+        [
+            ("2015-01-02", "A", "B", "Lightweight", 10.0, 45, 15, 3, 1),
+            ("2015-03-12", "A", "C", "Lightweight", 15.0, 60, 22, 2, 0),
+            ("2015-05-03", "B", "C", "Lightweight", 12.0, 28, 31, 1, 2),
+            ("2015-08-04", "D", "E", "Heavyweight", 8.0, 12, 9, 1, 1),
+            ("2016-01-02", "A", "B", "Lightweight", 10.0, 400, 1, 9, 0),
+            ("2016-02-01", "Future", "A", "Futureweight", 10.0, 500, 2, 8, 0),
+        ]
+    ):
         for fighter, opponent, sig, td in ((a, b, sig_a, td_a), (b, a, sig_b, td_b)):
-            rows.append(dict(bout_id=f"bout-{i}", event_id=f"event-{i}", date=date,
-                             fighter=fighter, opponent=opponent, division=division,
-                             minutes=minutes, sig_landed=sig, td_landed=td))
+            rows.append(
+                dict(
+                    bout_id=f"bout-{i}",
+                    event_id=f"event-{i}",
+                    date=date,
+                    fighter=fighter,
+                    opponent=opponent,
+                    division=division,
+                    minutes=minutes,
+                    sig_landed=sig,
+                    td_landed=td,
+                )
+            )
     return pd.DataFrame(rows)
 
 
 def targets():
-    return pd.DataFrame({"date": ["2016-01-23", "2016-01-02", "2016-02-12"],
-                         "R_fighter": ["A", "A", "C"], "B_fighter": ["B", "New", "A"],
-                         "weight_class": ["Lightweight", "Lightweight", "Heavyweight"],
-                         "Winner": ["Blue", "Red", "Red"]}, index=[7, 7, 3])
+    return pd.DataFrame(
+        {
+            "date": ["2016-01-23", "2016-01-02", "2016-02-12"],
+            "R_fighter": ["A", "A", "C"],
+            "B_fighter": ["B", "New", "A"],
+            "weight_class": ["Lightweight", "Lightweight", "Heavyweight"],
+            "Winner": ["Blue", "Red", "Red"],
+        },
+        index=[7, 7, 3],
+    )
 
 
 def test_future_and_current_month_cannot_change_features():
@@ -75,10 +93,13 @@ def test_swap_and_blue_minus_red_matchup_rates():
             assert_allclose(original[column], other[column.replace("R_", "B_", 1)], atol=0)
         elif column.endswith("_dif"):
             assert_allclose(original[column], -other[column], atol=0)
-    assert_allclose(original.perf_adj_sig_lograte_dif,
-                    original.perf_adj_sig_attack_dif + original.perf_adj_sig_defense_dif)
-    assert_allclose(original.perf_adj_td_lograte_dif,
-                    original.perf_adj_td_attack_dif + original.perf_adj_td_defense_dif)
+    assert_allclose(
+        original.perf_adj_sig_lograte_dif,
+        original.perf_adj_sig_attack_dif + original.perf_adj_sig_defense_dif,
+    )
+    assert_allclose(
+        original.perf_adj_td_lograte_dif, original.perf_adj_td_attack_dif + original.perf_adj_td_defense_dif
+    )
 
 
 def test_no_history_unknown_and_unseen_division():
@@ -104,8 +125,10 @@ def test_scheduled_division_is_used_per_target():
     target["weight_class"] = ["Lightweight", "Heavyweight", "UFC Lightweight Title Bout"]
     result = adjusted.build_adjusted_features(observations(), target)
     state = adjusted.fit_adjusted_state(observations().iloc[:8], "2016-01-01")
-    assert_allclose(result.R_perf_adj_sig_lograte.iloc[0] - result.R_perf_adj_sig_lograte.iloc[1],
-                    state.sig.division_effects["lightweight"] - state.sig.division_effects["heavyweight"])
+    assert_allclose(
+        result.R_perf_adj_sig_lograte.iloc[0] - result.R_perf_adj_sig_lograte.iloc[1],
+        state.sig.division_effects["lightweight"] - state.sig.division_effects["heavyweight"],
+    )
     assert result.R_perf_adj_sig_lograte.iloc[0] == result.R_perf_adj_sig_lograte.iloc[2]
 
 
@@ -115,20 +138,37 @@ def test_weighted_rate_and_unpenalized_intercept_score():
     state = adjusted.fit_adjusted_state(obs, cutoff)
     for name in ("sig", "td"):
         channel = getattr(state, name)
-        lograte = np.array([channel.intercept + channel.division_effects[adjusted._division(row.division)]
-                            + channel.attack[adjusted._fighter_key(row.fighter, row.division)]
-                            - channel.defense[adjusted._fighter_key(row.opponent, row.division)]
-                            for row in obs.itertuples()])
+        lograte = np.array(
+            [
+                channel.intercept
+                + channel.division_effects[adjusted._division(row.division)]
+                + channel.attack[adjusted._fighter_key(row.fighter, row.division)]
+                - channel.defense[adjusted._fighter_key(row.opponent, row.division)]
+                for row in obs.itertuples()
+            ]
+        )
         weight = obs.minutes.to_numpy() * 0.5 ** (
-            ((cutoff - pd.to_datetime(obs.date)).dt.total_seconds().to_numpy() / 86400 / 365.25) / 4)
+            ((cutoff - pd.to_datetime(obs.date)).dt.total_seconds().to_numpy() / 86400 / 365.25) / 4
+        )
         # The unpenalized intercept has zero Poisson score: sum(w * mu)=sum(w*y).
-        assert_allclose(np.average(np.exp(lograte), weights=weight),
-                        np.average(obs[f"{name}_landed"] / obs.minutes, weights=weight), rtol=2e-6)
+        assert_allclose(
+            np.average(np.exp(lograte), weights=weight),
+            np.average(obs[f"{name}_landed"] / obs.minutes, weights=weight),
+            rtol=2e-6,
+        )
 
 
-@pytest.mark.parametrize("column,value", [("minutes", 0), ("minutes", -1), ("minutes", np.inf),
-                                          ("sig_landed", -1), ("td_landed", np.nan),
-                                          ("td_landed", 1.2)])
+@pytest.mark.parametrize(
+    "column,value",
+    [
+        ("minutes", 0),
+        ("minutes", -1),
+        ("minutes", np.inf),
+        ("sig_landed", -1),
+        ("td_landed", np.nan),
+        ("td_landed", 1.2),
+    ],
+)
 def test_invalid_exposure_and_counts_fail(column, value):
     obs = observations().iloc[:8].copy()
     obs[column] = obs[column].astype(float)
@@ -177,8 +217,12 @@ def test_parser_lowercase_divisions_match_titlecase_scheduled_division():
     target = targets().iloc[:1]
     result = adjusted.build_adjusted_features(obs, target)
     state = adjusted.fit_adjusted_state(obs, "2016-01-01")
-    expected = (state.sig.intercept + state.sig.division_effects["lightweight"]
-                + state.sig.attack["a"] - state.sig.defense["b"])
+    expected = (
+        state.sig.intercept
+        + state.sig.division_effects["lightweight"]
+        + state.sig.attack["a"]
+        - state.sig.defense["b"]
+    )
     assert_allclose(result.R_perf_adj_sig_lograte, expected)
     normalized = target.assign(weight_class="lightweight")
     assert_frame_equal(result, adjusted.build_adjusted_features(obs, normalized), check_exact=True)

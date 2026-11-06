@@ -16,7 +16,15 @@ import glob
 import pandas as pd
 
 from ufc_pred.research.harness import (
-    DEV_YEARS, KEYS, OUT, load_base, logit, report, roi_by_bucket, sigmoid, walk_forward_stack,
+    DEV_YEARS,
+    KEYS,
+    OUT,
+    load_base,
+    logit,
+    report,
+    roi_by_bucket,
+    sigmoid,
+    walk_forward_stack,
 )
 
 DST = OUT / "claude"
@@ -56,7 +64,9 @@ def main():
     pcols = [c for c in df if c.startswith("p_")]
     # stacks start after a 2-year warmup; compare everything on the common support
     ev = df.dropna(subset=pcols).reset_index(drop=True)
-    print(f"dev common support: {len(ev)} fights, {ev.card.nunique()} cards, years {sorted(ev.year.unique())}")
+    print(
+        f"dev common support: {len(ev)} fights, {ev.card.nunique()} cards, years {sorted(ev.year.unique())}"
+    )
     ll, roi = report(ev, pcols)
     pd.set_option("display.width", 200)
     print(ll.round(4).to_string(index=False))
@@ -69,7 +79,11 @@ def main():
     print("\nper-year delta log-loss vs q")
     from ufc_pred.research.harness import logloss
 
-    py = ev.assign(**{c: logloss(ev[c], ev.y) - logloss(ev.q, ev.y) for c in pcols}).groupby("year")[pcols].mean()
+    py = (
+        ev.assign(**{c: logloss(ev[c], ev.y) - logloss(ev.q, ev.y) for c in pcols})
+        .groupby("year")[pcols]
+        .mean()
+    )
     print(py.round(4).to_string())
 
 

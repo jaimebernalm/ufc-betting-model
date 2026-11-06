@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 from ufc_pred.research import anchored as A
-from ufc_pred.research.harness import KEYS, OUT, bfo_exact, card_bootstrap_mean, load_base, logit, logloss
+from ufc_pred.research.harness import KEYS, OUT, bfo_exact, card_bootstrap_mean, load_base, logloss
 
 OPP = OUT / "opportunities_kalshi.parquet"
 CAPTURES = "data/processed/shadow_candidate_2026_09_14_v2/captures/*.json"
@@ -99,7 +99,9 @@ def main():
     if bfo is not None and "q_close_consensus_R" in bfo:
         d = d.merge(bfo[KEYS + ["q_close_consensus_R"]], on=KEYS, how="left")
         d["q_book"] = d.q_close_consensus_R.fillna(d.q)
-    print(f"opportunities {len(d)}; with features {d.R_wins.notna().sum()}; with book q {d.q_book.notna().sum()}")
+    print(
+        f"opportunities {len(d)}; with features {d.R_wins.notna().sum()}; with book q {d.q_book.notna().sum()}"
+    )
     # 2026 refit of the annual protocol: train strictly before 2026-01-01
     train = base[base.date < pd.Timestamp("2026-01-01")].reset_index(drop=True)
     fns = {
@@ -122,13 +124,21 @@ def main():
         for c in ["p_anchor", "p_old_deployed"] + ["p_" + n for n in names]:
             for thr in [0.0, 0.02, 0.04]:
                 r = summarize(t, c, thr)
-                r.update(anchor=anchor, n=len(t), ll=float(logloss(t[c], t.y).mean()),
-                         ll_kmid=float(logloss(t.q_kalshi_mid, t.y).mean()))
+                r.update(
+                    anchor=anchor,
+                    n=len(t),
+                    ll=float(logloss(t[c], t.y).mean()),
+                    ll_kmid=float(logloss(t.q_kalshi_mid, t.y).mean()),
+                )
                 rows.append(r)
         t.to_parquet(OUT / f"claude/venue_kalshi_{anchor}.parquet", index=False)
     # descriptive common universe: same fights for every model and both anchors, non-debut only
     deb = load_base()[KEYS + ["debut"]]
-    tb = pd.read_parquet(OUT / "claude/venue_kalshi_q_book.parquet").drop(columns=["debut"], errors="ignore").merge(deb, on=KEYS, how="left")
+    tb = (
+        pd.read_parquet(OUT / "claude/venue_kalshi_q_book.parquet")
+        .drop(columns=["debut"], errors="ignore")
+        .merge(deb, on=KEYS, how="left")
+    )
     tk = pd.read_parquet(OUT / "claude/venue_kalshi_q_kalshi_mid.parquet")
     common = tb[(tb.debut == False) & tb.p_old_deployed.notna()][KEYS]  # noqa: E712
     for anchor, t in [("q_book", tb), ("q_kalshi_mid", tk)]:

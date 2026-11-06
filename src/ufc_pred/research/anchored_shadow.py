@@ -44,16 +44,30 @@ PERF_B1 = ROOT / "artifacts/r2026_10/codex/perf_features.parquet"
 PERF_B2 = ROOT / "artifacts/r2026_10/codex/perf_adjusted.parquet"
 SNAPSHOTS = ROOT / "data/raw/ufcstats_snapshots"
 UPSTREAM = "Greco1899/scrape_ufc_stats"
-UFCSTATS_FILES = ("ufc_event_details.csv", "ufc_fight_details.csv", "ufc_fight_results.csv",
-                  "ufc_fight_stats.csv", "ufc_fighter_details.csv", "ufc_fighter_tott.csv")
+UFCSTATS_FILES = (
+    "ufc_event_details.csv",
+    "ufc_fight_details.csv",
+    "ufc_fight_results.csv",
+    "ufc_fight_stats.csv",
+    "ufc_fighter_details.csv",
+    "ufc_fighter_tott.csv",
+)
 MAX_B_HISTORY_LAG_DAYS = 14  # B1/B2 older than this at the card date -> F1B abstains
 # Co-candidates fixed on 2026-10-13 before any prospective data (report section 4).
 # Bundles are versioned and never overwritten; v0 of F1 is kept for traceability only.
 CANDIDATES = {
-    "F1": dict(bundle=ROOT / "artifacts/r2026_10/anchored_shadow_bundle_v1", extra=[MKT_EXTRA], perf=False,
-               label="F1 = R6_mkt"),
-    "F1B": dict(bundle=ROOT / "artifacts/r2026_10/anchored_shadow_bundle_f1b_v1",
-                extra=[MKT_EXTRA, PERF_B1, PERF_B2], perf=True, label="F1+B1+B2 = R6_mkt + B1v2 + B2"),
+    "F1": dict(
+        bundle=ROOT / "artifacts/r2026_10/anchored_shadow_bundle_v1",
+        extra=[MKT_EXTRA],
+        perf=False,
+        label="F1 = R6_mkt",
+    ),
+    "F1B": dict(
+        bundle=ROOT / "artifacts/r2026_10/anchored_shadow_bundle_f1b_v1",
+        extra=[MKT_EXTRA, PERF_B1, PERF_B2],
+        perf=True,
+        label="F1+B1+B2 = R6_mkt + B1v2 + B2",
+    ),
 }
 FIT_DATA = [
     ROOT / "artifacts/shadow_candidate_2026_09_14_v2/training_features.parquet",
@@ -63,7 +77,9 @@ FIT_DATA = [
 ]
 # read-only: the live shadow runner's history, used only to recognise debutants
 LIVE_HISTORY = ROOT / "data/processed/shadow_candidate_2026_09_14_v2/history.parquet"
-POLICY = dict(ev_thr=0.02, kelly_frac=0.25, cap_per_fight=0.02, cap_per_card=0.15, edge_ceiling=0.10, fee_coeff=0.07)
+POLICY = dict(
+    ev_thr=0.02, kelly_frac=0.25, cap_per_fight=0.02, cap_per_card=0.15, edge_ceiling=0.10, fee_coeff=0.07
+)
 
 
 def _sha(path: Path) -> str:
@@ -100,18 +116,31 @@ def fit_bundle(name: str, before: str, seeds: int = 10) -> Path:
         m, a, cat = fn.fit(train, cutoff - pd.Timedelta(days=1), s)
         joblib.dump(m, bundle / f"seed{s}.joblib")
         a_used, cat_used, feats = a, cat, list(m.feature_names_)
-    code = [ROOT / "src/ufc_pred/research/anchored.py", ROOT / "src/ufc_pred/research/harness.py",
-            ROOT / "src/ufc_pred/research/anchored_shadow.py", ROOT / "src/ufc_pred/research/bfo.py"]
+    code = [
+        ROOT / "src/ufc_pred/research/anchored.py",
+        ROOT / "src/ufc_pred/research/harness.py",
+        ROOT / "src/ufc_pred/research/anchored_shadow.py",
+        ROOT / "src/ufc_pred/research/bfo.py",
+    ]
     if cand["perf"]:
-        code += [ROOT / "src/ufc_pred/research/perf_features.py", ROOT / "src/ufc_pred/research/perf_adjusted.py",
-                 ROOT / "src/ufc_pred/research/perf_future.py"]
+        code += [
+            ROOT / "src/ufc_pred/research/perf_features.py",
+            ROOT / "src/ufc_pred/research/perf_adjusted.py",
+            ROOT / "src/ufc_pred/research/perf_future.py",
+        ]
     data = list(dict.fromkeys(FIT_DATA + cand["extra"]))
     manifest = {
-        "candidate": cand["label"] + " (co-candidate fixed 2026-10-13; see docs/INVESTIGACION_ROBUSTEZ_2026_10_13.md)",
+        "candidate": cand["label"]
+        + " (co-candidate fixed 2026-10-13; see docs/INVESTIGACION_ROBUSTEZ_2026_10_13.md)",
         "status": "PAPER SHADOW ONLY - exploratory prospective study; no real money",
-        "fit_before": before, "training_data_ends": str(train.date.max().date()),
-        "n_train": int(train.has_odds.sum()), "seeds": seeds,
-        "flb_slope_a": a_used, "cat_features": cat_used, "feature_names": feats, "policy": POLICY,
+        "fit_before": before,
+        "training_data_ends": str(train.date.max().date()),
+        "n_train": int(train.has_odds.sum()),
+        "seeds": seeds,
+        "flb_slope_a": a_used,
+        "cat_features": cat_used,
+        "feature_names": feats,
+        "policy": POLICY,
         "created_utc": dt.datetime.now(dt.UTC).isoformat(),
         "code_sha256": {str(p.relative_to(ROOT)): _sha(p) for p in code},
         "data_sha256": {str(p.relative_to(ROOT)): _sha(p) for p in data},
@@ -122,7 +151,7 @@ def fit_bundle(name: str, before: str, seeds: int = 10) -> Path:
 
 
 def load_bundle(name: str = "F1", check_code: bool = True):
-    """Load and verify: model files, frozen data, policy and (by default) model code must match the manifest."""
+    """Load and verify: model files, frozen data, policy and (by default) model code match the manifest."""
     bundle = CANDIDATES[name]["bundle"]
     manifest = json.loads((bundle / "manifest.json").read_text())
     for fname, digest in manifest["model_sha256"].items():
@@ -182,9 +211,15 @@ def refresh_ufcstats(min_interval_hours: float = 6.0, force: bool = False) -> di
     state = json.loads(state_path.read_text()) if state_path.exists() else {}
     now = dt.datetime.now(dt.UTC)
     last = state.get("last_check_utc")
-    if not force and last and (now - dt.datetime.fromisoformat(last)).total_seconds() < min_interval_hours * 3600:
+    if (
+        not force
+        and last
+        and (now - dt.datetime.fromisoformat(last)).total_seconds() < min_interval_hours * 3600
+    ):
         return {"status": "skipped_recent_check", **state}
-    resp = requests.get(f"https://api.github.com/repos/{UPSTREAM}/commits", params={"per_page": 1}, timeout=30)
+    resp = requests.get(
+        f"https://api.github.com/repos/{UPSTREAM}/commits", params={"per_page": 1}, timeout=30
+    )
     resp.raise_for_status()
     commit = resp.json()[0]
     sha, when = commit["sha"], commit["commit"]["committer"]["date"]
@@ -252,10 +287,12 @@ def parse_method_props(page: str) -> dict[int, dict[int, dict[str, float]]]:
     start = page.find('<table class="odds-table">')
     if start < 0:
         return {}
-    table = page[start: page.find("</table>", start)]
+    table = page[start : page.find("</table>", start)]
     thead = table.partition("<tbody")[0]
-    books = {int(b): bfo._text(inner.split("<br", 1)[0])
-             for b, inner in re.findall(r'<th scope="col" data-b="(\d+)">(.*?)</th>', thead, re.S)}
+    books = {
+        int(b): bfo._text(inner.split("<br", 1)[0])
+        for b, inner in re.findall(r'<th scope="col" data-b="(\d+)">(.*?)</th>', thead, re.S)
+    }
     allowed = {b for b, name in books.items() if name in SPORTSBOOK_PRIORITY}
     out: dict[int, dict[int, dict[str, list]]] = {}
     for book, yes, mu, ptype, pos, odds in re.findall(
@@ -269,8 +306,10 @@ def parse_method_props(page: str) -> dict[int, dict[int, dict[str, float]]]:
             continue
         dec = 1 + (100 / -v if v < 0 else v / 100)
         out.setdefault(int(mu), {}).setdefault(int(pos), {}).setdefault(kind, []).append(dec)
-    return {mu: {pos: {k: 1 / float(np.median(v)) for k, v in kinds.items()} for pos, kinds in d.items()}
-            for mu, d in out.items()}
+    return {
+        mu: {pos: {k: 1 / float(np.median(v)) for k, v in kinds.items()} for pos, kinds in d.items()}
+        for mu, d in out.items()
+    }
 
 
 def find_bfo_event(card_date: pd.Timestamp, names: tuple[str, str]):
@@ -377,8 +416,10 @@ def decide(p_red: float, q: float, asks: dict) -> dict:
 
 
 def _prior_ufc_bouts(name: str, before: pd.Timestamp) -> int:
-    """UFC appearances strictly before `before`: frozen verified history + the live shadow history (read-only)."""
-    frames = [pd.read_parquet(ROOT / "artifacts/shadow_candidate_2026_09_14_v2/verified_history.parquet")[KEYS]]
+    """UFC appearances strictly before `before`: frozen verified history + live shadow history (read-only)."""
+    frames = [
+        pd.read_parquet(ROOT / "artifacts/shadow_candidate_2026_09_14_v2/verified_history.parquet")[KEYS]
+    ]
     if LIVE_HISTORY.exists():
         frames.append(pd.read_parquet(LIVE_HISTORY)[KEYS])
     h = pd.concat(frames, ignore_index=True).drop_duplicates()
@@ -398,10 +439,15 @@ def score_capture(path: Path, bundles: dict, max_lag_min: float) -> dict:
     raw = path.read_bytes()
     cap = json.loads(raw)
     manifest = bundles["F1"][0]
-    rec = {"capture_file": path.name, "capture_sha256": hashlib.sha256(raw).hexdigest(),
-           "runner_sha256": _sha(Path(__file__)),
-           "bundle_manifest_sha256": {n: _sha(CANDIDATES[n]["bundle"] / "manifest.json") for n in bundles},
-           "bundle_fit_before": manifest["fit_before"], "paper_only": True, "executed": False}
+    rec = {
+        "capture_file": path.name,
+        "capture_sha256": hashlib.sha256(raw).hexdigest(),
+        "runner_sha256": _sha(Path(__file__)),
+        "bundle_manifest_sha256": {n: _sha(CANDIDATES[n]["bundle"] / "manifest.json") for n in bundles},
+        "bundle_fit_before": manifest["fit_before"],
+        "paper_only": True,
+        "executed": False,
+    }
     if not (np.isfinite(max_lag_min) and max_lag_min > 0):
         raise ValueError("max_lag_min must be finite and positive")
     captured = pd.to_datetime(cap.get("captured_at_utc"), utc=True, errors="coerce")
@@ -470,13 +516,33 @@ def score_capture(path: Path, bundles: dict, max_lag_min: float) -> dict:
             r = pd.concat([row.reset_index(drop=True), perf.reset_index(drop=True)], axis=1)
         preds = [fn.predict(m, man["flb_slope_a"], man["cat_features"], r)[0] for m in models]
         p = float(np.mean(preds))
-        results[name] = {**info, "status": "scored", "p_red": p, "p_red_seed_std": float(np.std(preds)),
-                         **decide(p, q, asks)}
+        results[name] = {
+            **info,
+            "status": "scored",
+            "p_red": p,
+            "p_red_seed_std": float(np.std(preds)),
+            **decide(p, q, asks),
+        }
     a = manifest["flb_slope_a"]
-    controls = {"q_book": q, "p_mf": float(1 / (1 + np.exp(-a * logit(q)))), "q_kalshi_mid": asks.get("q_kalshi_mid")}
-    return {**rec, "status": "scored", "card_date": str(card_date.date()), "R_fighter": red, "B_fighter": blue,
-            "book": book, "R_odds": r_odds, "B_odds": b_odds, **feats, **asks,
-            "controls": controls, "candidates": results}
+    controls = {
+        "q_book": q,
+        "p_mf": float(1 / (1 + np.exp(-a * logit(q)))),
+        "q_kalshi_mid": asks.get("q_kalshi_mid"),
+    }
+    return {
+        **rec,
+        "status": "scored",
+        "card_date": str(card_date.date()),
+        "R_fighter": red,
+        "B_fighter": blue,
+        "book": book,
+        "R_odds": r_odds,
+        "B_odds": b_odds,
+        **feats,
+        **asks,
+        "controls": controls,
+        "candidates": results,
+    }
 
 
 def pending_captures(captures: Path) -> list[Path]:
@@ -525,14 +591,25 @@ def report() -> pd.DataFrame:
     rows = []
     for p in sorted(OUTDIR.glob("*.anchored.json")):
         r = json.loads(p.read_text())
-        base = {k: r.get(k) for k in ("capture_file", "status", "card_date", "R_fighter", "B_fighter", "captured_at_utc")}
+        base = {
+            k: r.get(k)
+            for k in ("capture_file", "status", "card_date", "R_fighter", "B_fighter", "captured_at_utc")
+        }
         base.update(r.get("controls") or {})
         if not r.get("candidates"):
             rows.append(base)
             continue
         for name, c in r["candidates"].items():
-            rows.append({**base, "candidate": name, "cand_status": c.get("status"), "p_red": c.get("p_red"),
-                         "signal": c.get("signal"), "raw_kelly_frac_unexecuted": c.get("raw_kelly_frac_unexecuted")})
+            rows.append(
+                {
+                    **base,
+                    "candidate": name,
+                    "cand_status": c.get("status"),
+                    "p_red": c.get("p_red"),
+                    "signal": c.get("signal"),
+                    "raw_kelly_frac_unexecuted": c.get("raw_kelly_frac_unexecuted"),
+                }
+            )
     d = pd.DataFrame(rows)
     if d.empty or "signal" not in d:
         return d
@@ -566,7 +643,11 @@ def main():
     if args.cmd == "fit":
         print(fit_bundle(args.candidate, args.before, args.seeds))
     elif args.cmd in ("score", "run"):
-        recs = score_dir(args.captures, args.max_lag_min) if args.cmd == "score" else run(args.captures, args.max_lag_min)
+        recs = (
+            score_dir(args.captures, args.max_lag_min)
+            if args.cmd == "score"
+            else run(args.captures, args.max_lag_min)
+        )
         for rec in recs:
             sig = {n: c.get("signal", c.get("status")) for n, c in (rec.get("candidates") or {}).items()}
             print(stamp, rec.get("capture_file"), rec.get("status"), sig, flush=True)
@@ -574,7 +655,13 @@ def main():
         print(json.dumps(refresh_ufcstats(force=args.force), indent=1))
     else:
         d = report()
-        print(d.groupby(["candidate", "signal"]).size() if "signal" in d else d.status.value_counts() if not d.empty else "no records")
+        print(
+            d.groupby(["candidate", "signal"]).size()
+            if "signal" in d
+            else d.status.value_counts()
+            if not d.empty
+            else "no records"
+        )
 
 
 if __name__ == "__main__":

@@ -8,9 +8,10 @@ from ufc_pred.research import anchored as A
 from ufc_pred.research.harness import bets_at_book_odds, load_base, logit, roi_summary
 
 pytestmark = pytest.mark.skipif(
-    not A.__file__ or not __import__("pathlib").Path(
-        "artifacts/shadow_candidate_2026_09_14_v2/training_features.parquet"
-    ).exists(),
+    not A.__file__
+    or not __import__("pathlib")
+    .Path("artifacts/shadow_candidate_2026_09_14_v2/training_features.parquet")
+    .exists(),
     reason="needs the local dataset",
 )
 
@@ -28,11 +29,16 @@ def _swap_rows(t: pd.DataFrame) -> pd.DataFrame:
     return sw
 
 
-@pytest.mark.parametrize("make", [
-    lambda: A.make_resid_fn(logit_q_feature=True, flb_baseline=True, params=dict(A.RESID_V0, iterations=30)),
-    lambda: A.make_glm_resid_fn(),
-    lambda: A.make_flb_fn(),
-])
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: A.make_resid_fn(
+            logit_q_feature=True, flb_baseline=True, params=dict(A.RESID_V0, iterations=30)
+        ),
+        lambda: A.make_glm_resid_fn(),
+        lambda: A.make_flb_fn(),
+    ],
+)
 def test_corner_symmetry(base, make):
     train = base[(base.year < 2019) & base.has_odds].reset_index(drop=True)
     test = base[(base.year == 2019) & base.has_odds].head(60).reset_index(drop=True)

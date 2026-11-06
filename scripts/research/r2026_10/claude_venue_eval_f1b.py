@@ -33,7 +33,11 @@ def main():
     base = load_base(fill_bfo_from="2024-01-01")
     for extra in [S.MKT_EXTRA, S.PERF_B1, S.PERF_B2]:
         base = base.merge(pd.read_parquet(extra), on=KEYS, how="left", validate="one_to_one")
-    perf_cols = [c for c in pd.read_parquet(S.PERF_B1).columns.union(pd.read_parquet(S.PERF_B2).columns) if c not in KEYS]
+    perf_cols = [
+        c
+        for c in pd.read_parquet(S.PERF_B1).columns.union(pd.read_parquet(S.PERF_B2).columns)
+        if c not in KEYS
+    ]
     caps = capture_rows(opp, base)
     rebuilt = []
     for i in range(len(caps)):
@@ -73,10 +77,16 @@ def main():
         assert len(chk) == len(t) and diff < 1e-9
         for c in ["p_F1_R6_mkt", "p_F1B"]:
             r = summarize(t, c, 0.02)
-            r.update(anchor=anchor, n=len(t), ll=float(logloss(t[c], t.y).mean()),
-                     ll_kmid=float(logloss(t.q_kalshi_mid, t.y).mean()))
+            r.update(
+                anchor=anchor,
+                n=len(t),
+                ll=float(logloss(t[c], t.y).mean()),
+                ll_kmid=float(logloss(t.q_kalshi_mid, t.y).mean()),
+            )
             rows.append(r)
-        t[KEYS + ["q", "p_F1_R6_mkt", "p_F1B"]].to_parquet(OUT / f"claude/venue_kalshi_f1b_{anchor}.parquet", index=False)
+        t[KEYS + ["q", "p_F1_R6_mkt", "p_F1B"]].to_parquet(
+            OUT / f"claude/venue_kalshi_f1b_{anchor}.parquet", index=False
+        )
     pd.set_option("display.width", 220)
     print(pd.DataFrame(rows).round(4).to_string(index=False))
 

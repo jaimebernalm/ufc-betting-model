@@ -8,7 +8,6 @@ Pre-declared economic rule: EV > 0.02 at the offered price, non-debut fights.
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 
 import numpy as np
@@ -22,7 +21,9 @@ YEARS = [2024, 2025, 2026]
 
 def load(names: list[str]) -> pd.DataFrame:
     base = load_base(fill_bfo_from="2024-01-01")
-    base = base[base.year.isin(YEARS) & base.q.notna()][KEYS + ["card", "year", "y", "q", "R_odds", "B_odds", "debut", "odds_source"]]
+    base = base[base.year.isin(YEARS) & base.q.notna()][
+        KEYS + ["card", "year", "y", "q", "R_odds", "B_odds", "debut", "odds_source"]
+    ]
     e0 = pd.read_parquet(OUT / "e0_oof.parquet").rename(columns={"p_stats_v2": "p_A0"})
     base = base.merge(e0[KEYS + ["p_A0"]], on=KEYS, how="left")
     base["p_A0T"] = sigmoid(1.25 * logit(base.p_A0))
@@ -41,7 +42,11 @@ def main():
     names = args.names.split(",")
     df = load(names)
     pcols = ["p_" + n for n in names] + ["p_A0", "p_A0T"]
-    slices = {"all": df, "kaggle": df[df.odds_source.eq("kaggle")], "bfo_ext": df[df.odds_source.ne("kaggle")]}
+    slices = {
+        "all": df,
+        "kaggle": df[df.odds_source.eq("kaggle")],
+        "bfo_ext": df[df.odds_source.ne("kaggle")],
+    }
     rows_ll, rows_roi = [], []
     for sname, s in slices.items():
         for c in pcols:
@@ -64,7 +69,10 @@ def main():
     roi.to_csv(DST / "holdout_roi.csv", index=False)
     print("\nper-year (all slice, non-debut, EV>.02):")
     for c in pcols:
-        yr = {int(y): round(roi_summary(g[~g.debut], c, 0.02).get("roi", np.nan), 3) for y, g in df.groupby("year")}
+        yr = {
+            int(y): round(roi_summary(g[~g.debut], c, 0.02).get("roi", np.nan), 3)
+            for y, g in df.groupby("year")
+        }
         print(c, yr)
     df.to_parquet(DST / "holdout_eval.parquet", index=False)
 

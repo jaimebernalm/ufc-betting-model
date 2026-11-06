@@ -86,13 +86,17 @@ def roi_table(df, pcol, thresholds=(0.0, 0.02, 0.04, 0.06)):
         if len(r) == 0:
             continue
         lo, hi = card_boot(r, np.array(card)) if len(r) > 5 else (np.nan, np.nan)
-        rows.append(dict(model=pcol, ev_thr=t, bets=len(r), roi=r.mean(), lo=lo, hi=hi, fav_share=np.mean(side_fav)))
+        rows.append(
+            dict(model=pcol, ev_thr=t, bets=len(r), roi=r.mean(), lo=lo, hi=hi, fav_share=np.mean(side_fav))
+        )
     return pd.DataFrame(rows)
 
 
 def main():
     df = pd.read_parquet(OUT / "e0_oof.parquet")
-    df = df[df.q.notna() & np.isfinite(df.q) & (df.R_odds.abs() >= 100) & (df.B_odds.abs() >= 100)].reset_index(drop=True)
+    df = df[
+        df.q.notna() & np.isfinite(df.q) & (df.R_odds.abs() >= 100) & (df.B_odds.abs() >= 100)
+    ].reset_index(drop=True)
     models = [c for c in df if c.startswith("p_")]
     df["p_flb"] = walk_forward_stack(df, ["q"])
     for m in [c for c in models if c != "p_resid"]:
@@ -109,7 +113,13 @@ def main():
         lo, hi = card_boot(d, cards)
         print(f"{c:22s} {ll(ev[c], ev.y).mean():8.4f} {d.mean():+8.4f}  [{lo:+.4f}, {hi:+.4f}]")
     print("\nper year log loss")
-    print(ev.assign(**{c: ll(ev[c], ev.y) for c in ["q"] + allp}).groupby("test_year")[["q"] + allp].mean().round(4).to_string())
+    print(
+        ev.assign(**{c: ll(ev[c], ev.y) for c in ["q"] + allp})
+        .groupby("test_year")[["q"] + allp]
+        .mean()
+        .round(4)
+        .to_string()
+    )
     print("\nflat ROI at real book odds (vig included), bet the side with best EV above thr")
     tabs = pd.concat([roi_table(ev, c) for c in allp], ignore_index=True)
     print(tabs.round(4).to_string())

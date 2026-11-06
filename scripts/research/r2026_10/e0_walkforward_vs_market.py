@@ -125,7 +125,10 @@ def main():
                 col[mask] = p
                 p = col
             out["p_" + recipe] = p
-            print(f"{year} {recipe}: n_train={len(tr)} n_test={len(te)} {time.monotonic() - t0:.0f}s", flush=True)
+            print(
+                f"{year} {recipe}: n_train={len(tr)} n_test={len(te)} {time.monotonic() - t0:.0f}s",
+                flush=True,
+            )
         rows.append(out)
         pd.concat(rows, ignore_index=True).to_parquet(OUT / "e0_oof.parquet", index=False)
     print("done")

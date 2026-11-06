@@ -15,7 +15,9 @@ import pandas as pd
 from ufc_pred.research.harness import OUT, american_to_decimal, load_base
 
 
-def simulate(df: pd.DataFrame, pcol: str, frac: float, cap: float, card_cap: float, ev_thr: float, edge_ceiling: float):
+def simulate(
+    df: pd.DataFrame, pcol: str, frac: float, cap: float, card_cap: float, ev_thr: float, edge_ceiling: float
+):
     d = df.dropna(subset=[pcol, "q"]).sort_values("date")
     equity, peak, mdd, path = 1.0, 1.0, 0.0, []
     n_bets = 0
@@ -46,8 +48,18 @@ def simulate(df: pd.DataFrame, pcol: str, frac: float, cap: float, card_cap: flo
         peak = max(peak, equity)
         mdd = max(mdd, 1 - equity / peak)
         path.append(equity)
-    return dict(model=pcol, frac=frac, cap=cap, card_cap=card_cap, ev_thr=ev_thr, ceiling=edge_ceiling,
-                bets=n_bets, final=equity, max_dd=mdd, cards=len(path))
+    return dict(
+        model=pcol,
+        frac=frac,
+        cap=cap,
+        card_cap=card_cap,
+        ev_thr=ev_thr,
+        ceiling=edge_ceiling,
+        bets=n_bets,
+        final=equity,
+        max_dd=mdd,
+        cards=len(path),
+    )
 
 
 def main():

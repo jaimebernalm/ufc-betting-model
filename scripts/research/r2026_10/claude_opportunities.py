@@ -59,8 +59,12 @@ def load_captures() -> pd.DataFrame:
                     captured_at_utc=pd.Timestamp(j.get("captured_at_utc")),
                     # snapshot asks and model probabilities follow KALSHI's ticker_a/ticker_b order;
                     # kalshi_swap_vs_ufc=True means ticker_a is the UFC fighter_b
-                    a=fight.get("fighter_b_ufc") if fight.get("kalshi_swap_vs_ufc") else fight.get("fighter_a_ufc"),
-                    b=fight.get("fighter_a_ufc") if fight.get("kalshi_swap_vs_ufc") else fight.get("fighter_b_ufc"),
+                    a=fight.get("fighter_b_ufc")
+                    if fight.get("kalshi_swap_vs_ufc")
+                    else fight.get("fighter_a_ufc"),
+                    b=fight.get("fighter_a_ufc")
+                    if fight.get("kalshi_swap_vs_ufc")
+                    else fight.get("fighter_b_ufc"),
                     swap_vs_ufc=fight.get("kalshi_swap_vs_ufc"),
                     a_ask=ks.get("a_ask"),
                     b_ask=ks.get("b_ask"),
@@ -90,8 +94,15 @@ def attach_outcomes(d: pd.DataFrame) -> pd.DataFrame:
             continue
         m = m.iloc[0]
         a_is_red = norm(m.R_fighter) == norm(r.a)
-        out.append(dict(R_fighter=m.R_fighter, B_fighter=m.B_fighter, date=m.date,
-                        y=int(m.Winner == "Red"), a_is_red=a_is_red))
+        out.append(
+            dict(
+                R_fighter=m.R_fighter,
+                B_fighter=m.B_fighter,
+                date=m.date,
+                y=int(m.Winner == "Red"),
+                a_is_red=a_is_red,
+            )
+        )
     return pd.concat([d, pd.DataFrame(out)], axis=1)
 
 
@@ -116,9 +127,26 @@ def main():
     # within a few minutes after it is still pre-bout for later fights, but timing is NOT verified
     # per bout -> venue results are a diagnostic, not an executable T-90 backtest.
     d["minutes_after_sched_start"] = (d.captured_at_utc - d.fight_date_utc).dt.total_seconds() / 60
-    cols = ["date", "R_fighter", "B_fighter", "card", "y", "source", "event", "captured_at_utc", "fight_date_utc",
-            "R_ask", "B_ask", "R_bid", "B_bid", "q_kalshi_mid", "volume", "old_p_R", "old_p_R_raw",
-            "minutes_after_sched_start"]
+    cols = [
+        "date",
+        "R_fighter",
+        "B_fighter",
+        "card",
+        "y",
+        "source",
+        "event",
+        "captured_at_utc",
+        "fight_date_utc",
+        "R_ask",
+        "B_ask",
+        "R_bid",
+        "B_bid",
+        "q_kalshi_mid",
+        "volume",
+        "old_p_R",
+        "old_p_R_raw",
+        "minutes_after_sched_start",
+    ]
     d[cols].to_parquet(OUT, index=False)
     print(d.groupby("source").size(), d.card.nunique(), "cards ->", OUT)
 
