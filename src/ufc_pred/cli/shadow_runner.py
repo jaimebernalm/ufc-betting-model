@@ -18,8 +18,8 @@ import pandas as pd
 
 from ufc_pred.paths import PROCESSED, ROOT
 
-BUNDLE = ROOT / "artifacts/shadow_candidate_2026_09_14_v2"
-SHADOW = PROCESSED / "shadow_candidate_2026_09_14_v2"
+BUNDLE = ROOT / "artifacts/shadow_capture_2026_11_05_v2_1"
+SHADOW = PROCESSED / "shadow_capture_2026_11_05_v2_1"
 
 
 def verify_bundle():
@@ -133,6 +133,7 @@ def main():
                 anchor = json.loads((BUNDLE / "shadow_protocol.json").read_text())["reference_bankrolls"]
                 runner.BANKROLLS_PATH.write_text(json.dumps(anchor, indent=2))
             runner.notify = lambda *a, **kw: None
+            runner.CAPTURE_ALL_AT_LEAD = True
 
             def schedule_record(date, event, schedule):
                 from dataclasses import asdict
