@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from ufc_pred.backtest.universe import add_prior_fight_counts
+from ufc_pred.paths import ROOT
 from ufc_pred.research.harness import KEYS, OUT, american_to_decimal, card_bootstrap_mean, load_base
 
 MODELS = {"F1": "p_R6_mkt", "F1B": "p_R6_mkt_B1v2B2"}
@@ -35,7 +36,7 @@ FIXED = {
     "2x Kelly sin topes": (0.02, 2.0, 1.0, 1.0, 1.0),
 }
 B, H, SEED = 500, 100, 0
-LIVE_HISTORY = "/Users/jaimebernal/Desktop/pred_project/UFC pred/data/processed/shadow_candidate_2026_09_14_v2/history.parquet"
+LIVE_HISTORY = ROOT / "data/processed/shadow_candidate_2026_09_14_v2/history.parquet"
 
 
 def bets_books(df: pd.DataFrame, pcol: str) -> pd.DataFrame:

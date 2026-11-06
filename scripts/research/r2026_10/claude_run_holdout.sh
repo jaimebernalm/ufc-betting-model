@@ -2,7 +2,7 @@
 # Single holdout look (2024-2026) for the frozen finalist, fixed ablations and controls.
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
-PY="/Users/jaimebernal/Desktop/pred_project/UFC pred/.conda/bin/python"
+PY="${PY:-.conda/bin/python}"
 export PYTHONPATH=src
 RUN="scripts/research/r2026_10/claude_dev_run.py"
 MKT="artifacts/r2026_10/claude/mkt_extra.parquet"

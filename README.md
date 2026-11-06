@@ -25,6 +25,17 @@ returns in every window; the operational Kalshi replay remains negative. See the
 [comparisons](docs/ABLACIONES_Y_CAUSAS_DEL_DETERIORO_2026_09_14.md), and
 [shadow v2 validation](docs/ACTIVACION_SOMBRA_CANDIDATA_V2_2026_09_14.md).
 
+**October 2026 research:** retrained walk-forward, the shadow v2 recipe loses
+to the closing line (log-loss 0.700 vs 0.607), and its edges point at
+underdogs, the losing side of a growing favourite–longshot bias. v2 is retired
+as a decision model and kept only as the capture pipeline; the last state
+before this change is tagged `v2-legacy`. The new candidate (F1+B1+B2) is a
+*market-anchored residual*: it starts from the sportsbook price and learns a
+small correction from fight and performance features. It passed the market
+gate on 2024–2026 (Δ log-loss −0.006 vs the closing line) but has not shown
+a profit, so it is logged prospectively on paper only. See the
+[research report](docs/INVESTIGACION_ROBUSTEZ_2026_10_13.md) (in Spanish).
+
 ---
 
 ## The interesting result
@@ -141,6 +152,7 @@ src/ufc_pred/
 ├── backtest/     fee-correct ROI, strategy grid, CLV
 ├── inference/    predict → fee-correct → ¼-Kelly → cap
 ├── ops/          bankroll reconciliation, fill capture
+├── research/     walk-forward harness, market-anchored models, paper shadow logger
 └── cli/          five console entry points
 scripts/
 ├── research/     one-shot analyses, kept as a record

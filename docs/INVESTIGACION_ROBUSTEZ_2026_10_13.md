@@ -247,11 +247,11 @@ Antes de activarlo:
 
 ## Reproducción
 
-Desde el worktree. La ruta del intérprete contiene espacios, así que va entre comillas.
+Desde la raíz del repositorio. Si la ruta del intérprete contiene espacios, va entre comillas.
 
 ```bash
-cd /Users/jaimebernal/Desktop/pred_project/ufc-pred-research
-PY="/Users/jaimebernal/Desktop/pred_project/UFC pred/.conda/bin/python"
+cd <raíz del repositorio>
+PY=".conda/bin/python"
 export PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1
 "$PY" scripts/research/r2026_10/e0_walkforward_vs_market.py --years 2013-2026 --seeds 5
 "$PY" scripts/research/r2026_10/claude_dev_run.py --cands R3 --seeds 10

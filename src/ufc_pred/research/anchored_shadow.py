@@ -62,7 +62,7 @@ FIT_DATA = [
     MKT_EXTRA,
 ]
 # read-only: the live shadow runner's history, used only to recognise debutants
-LIVE_HISTORY = Path("/Users/jaimebernal/Desktop/pred_project/UFC pred/data/processed/shadow_candidate_2026_09_14_v2/history.parquet")
+LIVE_HISTORY = ROOT / "data/processed/shadow_candidate_2026_09_14_v2/history.parquet"
 POLICY = dict(ev_thr=0.02, kelly_frac=0.25, cap_per_fight=0.02, cap_per_card=0.15, edge_ceiling=0.10, fee_coeff=0.07)
 
 
