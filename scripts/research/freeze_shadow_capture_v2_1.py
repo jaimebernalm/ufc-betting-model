@@ -28,8 +28,13 @@ OLD_SHADOW = PROCESSED / "shadow_candidate_2026_09_14_v2"
 SHADOW = PROCESSED / "shadow_capture_2026_11_05_v2_1"
 LOGGER_OUT = PROCESSED / "anchored_shadow_2026_10_13"
 # Regenerated below; everything else in the v2 bundle is copied byte for byte.
-REGENERATED = {"manifest.json", "runtime_manifest.json", "shadow_protocol.json", "environment.json",
-               "com.ufcbet.watchdog.plist"}
+REGENERATED = {
+    "manifest.json",
+    "runtime_manifest.json",
+    "shadow_protocol.json",
+    "environment.json",
+    "com.ufcbet.watchdog.plist",
+}
 REGENERATED_DIRS = {"runtime_snapshot", "reproduction"}
 CONFIGS = ["configs/inference.json", "configs/fighter_aliases.json", "configs/fight_result_corrections.json"]
 
@@ -111,14 +116,27 @@ def main():
 
     python = str(ROOT / ".conda/bin/python")
     watchdog = plistlib.loads((OLD / "com.ufcbet.watchdog.plist").read_bytes())
-    watchdog["ProgramArguments"] = [python, "-m", "ufc_pred.cli.shadow_runner",
-                                    "--bundle", str(OUT), "--shadow-dir", str(SHADOW)]
+    watchdog["ProgramArguments"] = [
+        python,
+        "-m",
+        "ufc_pred.cli.shadow_runner",
+        "--bundle",
+        str(OUT),
+        "--shadow-dir",
+        str(SHADOW),
+    ]
     watchdog["StandardOutPath"] = watchdog["StandardErrorPath"] = str(SHADOW / "runner.log")
     (OUT / "com.ufcbet.watchdog.plist").write_bytes(plistlib.dumps(watchdog))
     logger = {
         "Label": "com.ufcbet.anchored-shadow",
-        "ProgramArguments": [python, "-m", "ufc_pred.research.anchored_shadow", "run",
-                             "--captures", str(SHADOW / "captures")],
+        "ProgramArguments": [
+            python,
+            "-m",
+            "ufc_pred.research.anchored_shadow",
+            "run",
+            "--captures",
+            str(SHADOW / "captures"),
+        ],
         "EnvironmentVariables": {"PYTHONPATH": str(ROOT / "src")},
         "WorkingDirectory": str(ROOT),
         "StartInterval": 60,

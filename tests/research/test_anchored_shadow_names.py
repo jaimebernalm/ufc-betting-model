@@ -25,11 +25,18 @@ def test_asks_orient_through_blue_when_red_is_spelled_differently():
 
 def test_bfo_matchup_found_by_surnames_and_relabelled(monkeypatch):
     rows = [
-        {"matchup_id": 7, "fighter_name": n, "fighter_pos": pos, "book_name": "DraftKings", "american_odds": o}
+        {
+            "matchup_id": 7,
+            "fighter_name": n,
+            "fighter_pos": pos,
+            "book_name": "DraftKings",
+            "american_odds": o,
+        }
         for n, pos, o in [("Alex Volkanovski", 1, -120), ("Movsar Evloev", 2, 100)]
     ]
-    monkeypatch.setattr(S.bfo, "list_event_urls", lambda refresh: [
-        {"slug": "ufc-333", "url": "u", "lastmod": "2026-10-24"}])
+    monkeypatch.setattr(
+        S.bfo, "list_event_urls", lambda refresh: [{"slug": "ufc-333", "url": "u", "lastmod": "2026-10-24"}]
+    )
     monkeypatch.setattr(S.bfo, "fetch", lambda url, refresh: "page")
     monkeypatch.setattr(S.bfo, "parse_event", lambda page: {"rows": rows})
     slug, _, g, mu = S.find_bfo_event(pd.Timestamp("2026-10-24"), ("Alexander Volkanovski", "Movsar Evloev"))

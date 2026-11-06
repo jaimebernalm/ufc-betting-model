@@ -224,7 +224,9 @@ def match_kalshi(
     return None
 
 
-def with_resolvable_names(kalshi: CardFight, fight: FightSchedule, swap: bool, fights: pd.DataFrame) -> CardFight:
+def with_resolvable_names(
+    kalshi: CardFight, fight: FightSchedule, swap: bool, fights: pd.DataFrame
+) -> CardFight:
     """Fall back to UFC.com's spelling for a corner whose Kalshi name does not resolve.
 
     Kalshi often writes a name differently from UFCStats ("Alex Volkanovski",
