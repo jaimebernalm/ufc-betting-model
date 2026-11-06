@@ -74,11 +74,28 @@ select = ["E", "F", "I", "W", "UP", "B"]
 # not library code. They keep straight-line top-level flow (E402), dense report
 # formatting (E501), and loop-scoped closures (B023) on purpose.
 "scripts/research/*" = ["E402", "E501", "B023", "B007"]
+"scripts/research/r2026_10/*" = ["E402", "E501", "B023", "B007", "B905"]
 "scripts/tools/*" = ["E402", "E501", "B023", "B007"]
 # Entry points must load .env before importing modules that read the environment.
 "src/ufc_pred/cli/*" = ["E402"]
 # Tests embed verbatim HTML fixtures that must not be reflowed.
 "tests/test_upcoming_feature_state.py" = ["E501"]
+# Frozen research model code: the paper-shadow bundles verify these files by
+# hash before loading, so they are kept byte-identical (see FROZEN_RESEARCH).
+"src/ufc_pred/research/anchored.py" = ["E501"]
+"src/ufc_pred/research/bfo.py" = ["B007"]
+"src/ufc_pred/research/harness.py" = ["E501", "B905"]
+
+[tool.ruff.format]
+# FROZEN_RESEARCH: same reason as above; reformatting would change their hashes.
+exclude = [
+    "src/ufc_pred/research/anchored.py",
+    "src/ufc_pred/research/bfo.py",
+    "src/ufc_pred/research/harness.py",
+    "src/ufc_pred/research/perf_adjusted.py",
+    "src/ufc_pred/research/perf_features.py",
+    "src/ufc_pred/research/perf_future.py",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
